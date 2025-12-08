@@ -161,6 +161,12 @@ func (w *windowManager) IsElevated() bool {
 	return IsElevated()
 }
 
+// IsWindowValid checks if a window handle still refers to a valid window
+func (w *windowManager) IsWindowValid(hwnd uintptr) bool {
+	ret, _, _ := procIsWindow.Call(hwnd)
+	return ret != 0
+}
+
 // CollectChildInfos collects information about all child windows
 func (w *windowManager) CollectChildInfos(hwnd uintptr) []ChildInfo {
 	return CollectChildInfos(hwnd)

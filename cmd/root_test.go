@@ -18,7 +18,6 @@ import (
 func resetFlags() {
 	// Reset command flags
 	_ = RootCmd.Flags().Set("verbose", "false")
-	_ = RootCmd.Flags().Set("recompile-all", "false")
 	_ = RootCmd.Flags().Set("logs", "false")
 }
 
@@ -212,7 +211,6 @@ func TestRootCmd_Help(t *testing.T) {
 	assert.Contains(t, output, "vtpc <file-path>", "Should show usage")
 	assert.Contains(t, output, "Automate compilation", "Should show description")
 	assert.Contains(t, output, "--verbose", "Should list verbose flag")
-	assert.Contains(t, output, "--recompile-all", "Should list recompile-all flag")
 	assert.Contains(t, output, "--logs", "Should list logs flag")
 }
 
@@ -221,74 +219,52 @@ func TestRootCmd_Flags(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name              string
-		args              []string
-		expectedVerbose   bool
-		expectedRecompile bool
-		expectedLogs      bool
+		name            string
+		args            []string
+		expectedVerbose bool
+		expectedLogs    bool
 	}{
 		{
-			name:              "no flags",
-			args:              []string{},
-			expectedVerbose:   false,
-			expectedRecompile: false,
-			expectedLogs:      false,
+			name:            "no flags",
+			args:            []string{},
+			expectedVerbose: false,
+			expectedLogs:    false,
 		},
 		{
-			name:              "verbose flag short",
-			args:              []string{"-V"},
-			expectedVerbose:   true,
-			expectedRecompile: false,
-			expectedLogs:      false,
+			name:            "verbose flag short",
+			args:            []string{"-V"},
+			expectedVerbose: true,
+			expectedLogs:    false,
 		},
 		{
-			name:              "verbose flag long",
-			args:              []string{"--verbose"},
-			expectedVerbose:   true,
-			expectedRecompile: false,
-			expectedLogs:      false,
+			name:            "verbose flag long",
+			args:            []string{"--verbose"},
+			expectedVerbose: true,
+			expectedLogs:    false,
 		},
 		{
-			name:              "recompile flag short",
-			args:              []string{"-r"},
-			expectedVerbose:   false,
-			expectedRecompile: true,
-			expectedLogs:      false,
+			name:            "logs flag short",
+			args:            []string{"-l"},
+			expectedVerbose: false,
+			expectedLogs:    true,
 		},
 		{
-			name:              "recompile flag long",
-			args:              []string{"--recompile-all"},
-			expectedVerbose:   false,
-			expectedRecompile: true,
-			expectedLogs:      false,
+			name:            "logs flag long",
+			args:            []string{"--logs"},
+			expectedVerbose: false,
+			expectedLogs:    true,
 		},
 		{
-			name:              "logs flag short",
-			args:              []string{"-l"},
-			expectedVerbose:   false,
-			expectedRecompile: false,
-			expectedLogs:      true,
+			name:            "multiple flags",
+			args:            []string{"-V", "-l"},
+			expectedVerbose: true,
+			expectedLogs:    true,
 		},
 		{
-			name:              "logs flag long",
-			args:              []string{"--logs"},
-			expectedVerbose:   false,
-			expectedRecompile: false,
-			expectedLogs:      true,
-		},
-		{
-			name:              "multiple flags",
-			args:              []string{"-V", "-r"},
-			expectedVerbose:   true,
-			expectedRecompile: true,
-			expectedLogs:      false,
-		},
-		{
-			name:              "all flags",
-			args:              []string{"--verbose", "--recompile-all", "--logs"},
-			expectedVerbose:   true,
-			expectedRecompile: true,
-			expectedLogs:      true,
+			name:            "all flags",
+			args:            []string{"--verbose", "--logs"},
+			expectedVerbose: true,
+			expectedLogs:    true,
 		},
 	}
 
@@ -302,7 +278,6 @@ func TestRootCmd_Flags(t *testing.T) {
 			}
 
 			cmd.PersistentFlags().BoolP("verbose", "V", false, "enable verbose output")
-			cmd.PersistentFlags().BoolP("recompile-all", "r", false, "trigger Recompile All")
 			cmd.PersistentFlags().BoolP("logs", "l", false, "print log file")
 
 			// Parse flags
@@ -312,10 +287,8 @@ func TestRootCmd_Flags(t *testing.T) {
 
 			// Verify flag values
 			verbose, _ := cmd.Flags().GetBool("verbose")
-			recompileAll, _ := cmd.Flags().GetBool("recompile-all")
 			showLogs, _ := cmd.Flags().GetBool("logs")
 			assert.Equal(t, tt.expectedVerbose, verbose, "Verbose flag mismatch")
-			assert.Equal(t, tt.expectedRecompile, recompileAll, "Recompile flag mismatch")
 			assert.Equal(t, tt.expectedLogs, showLogs, "Logs flag mismatch")
 		})
 	}

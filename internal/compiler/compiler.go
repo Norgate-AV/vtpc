@@ -1,9 +1,9 @@
-// Package compiler handles VTPro compilation orchestration and result parsing.
 package compiler
 
 import (
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,38 +18,27 @@ const (
 	// Message type constants for parsing detailed messages
 	msgTypeError   = "ERROR"
 	msgTypeWarning = "WARNING"
-	msgTypeNotice  = "NOTICE"
 
 	// Dialog title constants
-	dialogIncompleteSymbols   = "Incomplete Symbols"
-	dialogConvertCompile      = "Convert/Compile"
-	dialogCommentedOutSymbols = "Commented out Symbols and/or Devices"
-	dialogCompiling           = "Compiling..."
-	dialogCompileComplete     = "Compile Complete"
-	dialogProgramCompilation  = "Program Compilation"
-	dialogOperationComplete   = "Operation Complete"
-	dialogConfirmation        = "Confirmation"
+	dialogCompiling    = "VisionTools Pro-e Compiling..."
+	dialogVTProWarning = "VisionTools(R) Pro-e"
 )
 
 // CompileResult holds the results of a compilation
 type CompileResult struct {
 	Warnings        int
-	Notices         int
 	Errors          int
-	CompileTime     float64
 	ErrorMessages   []string
 	WarningMessages []string
-	NoticeMessages  []string
 	HasErrors       bool
 }
 
 // CompileOptions holds options for the compilation
 type CompileOptions struct {
 	FilePath                      string
-	RecompileAll                  bool
 	Hwnd                          uintptr
-	SimplPid                      uint32        // Known PID from ShellExecuteEx (preferred over searching)
-	SimplPidPtr                   *uint32       // Pointer to store PID for signal handlers
+	VTProPid                      uint32        // Known PID from ShellExecuteEx (preferred over searching)
+	VTProPidPtr                   *uint32       // Pointer to store PID for signal handlers
 	SkipPreCompilationDialogCheck bool          // For testing - skip the pre-compilation dialog check
 	CompilationTimeout            time.Duration // Override default timeout (0 = use default 5 minutes)
 }
@@ -107,14 +96,14 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 	result := &CompileResult{}
 
 	// Use the exact PID from ShellExecuteEx - no searching, no guessing
-	pid := opts.SimplPid
+	pid := opts.VTProPid
 	if pid == 0 {
 		c.log.Warn("No PID provided - dialog monitoring will be disabled")
 		c.log.Info("Warning: Could not determine VTPro process PID; dialog detection may be limited")
 	} else {
 		c.log.Debug("Using VTPro PID from launch", slog.Uint64("pid", uint64(pid)))
-		if opts.SimplPidPtr != nil {
-			*opts.SimplPidPtr = pid // Store for signal handler
+		if opts.VTProPidPtr != nil {
+			*opts.VTProPidPtr = pid // Store for signal handler
 		}
 	}
 
@@ -165,25 +154,13 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 		}
 	}
 
-	var success bool
-	if opts.RecompileAll {
-		// Try SendInput first (modern API, atomic operation)
-		success = c.keyboard.SendAltF12WithSendInput()
-		if !success {
-			c.log.Warn("SendAltF12WithSendInput failed, falling back to keybd_event")
-			c.keyboard.SendAltF12()
-		} else {
-			c.log.Debug("SendAltF12WithSendInput succeeded")
-		}
+	// Try SendInput first (modern API, atomic operation)
+	success := c.keyboard.SendF12WithSendInput()
+	if !success {
+		c.log.Warn("SendF12WithSendInput failed, falling back to keybd_event")
+		c.keyboard.SendF12()
 	} else {
-		// Try SendInput first (modern API, atomic operation)
-		success = c.keyboard.SendF12WithSendInput()
-		if !success {
-			c.log.Warn("SendF12WithSendInput failed, falling back to keybd_event")
-			c.keyboard.SendF12()
-		} else {
-			c.log.Debug("SendF12WithSendInput succeeded")
-		}
+		c.log.Debug("SendF12WithSendInput succeeded")
 	}
 
 	c.log.Debug("Starting compile monitoring")
@@ -254,8 +231,12 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 		compilingDetected       bool
 		compileCompleteDetected bool
 		compileCompleteHwnd     uintptr
-		programCompHwnd         uintptr
+		compilingDialogHwnd     uintptr
 	)
+
+	// Create a ticker to periodically check if compiling dialog has disappeared
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
 	c.log.Debug("Entering event-driven dialog monitoring loop")
 
@@ -270,134 +251,41 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 
 			// Handle each dialog type as it appears
 			switch ev.Title {
-			case dialogIncompleteSymbols:
-				// Fatal error - compilation cannot proceed
-				c.log.Error("Incomplete Symbols detected", slog.String("title", ev.Title))
-				c.log.Info("The program contains incomplete symbols and cannot be compiled.")
-				c.log.Info("Please fix the incomplete symbols in VTPro before attempting to compile.")
-
-				// Extract error details
-				childInfos := c.windowMgr.CollectChildInfos(ev.Hwnd)
-				for _, ci := range childInfos {
-					if ci.ClassName == "Edit" && len(ci.Text) > 50 {
-						c.log.Info("Details", slog.String("text", ci.Text))
-						break
-					}
-				}
-
-				// Close the dialog before returning
-				c.windowMgr.CloseWindow(ev.Hwnd, "Incomplete Symbols dialog")
-
-				// Return the VTPro hwnd so test cleanup can close it properly
-				// Return a result indicating compilation failed
-				return opts.Hwnd, &CompileResult{
-					Errors:    1,
-					HasErrors: true,
-					ErrorMessages: []string{
-						"Incomplete Symbols: The program contains incomplete symbols and cannot be compiled",
-					},
-				}, fmt.Errorf("program contains incomplete symbols and cannot be compiled")
-
-			case dialogConvertCompile:
-				// Save prompt - auto-confirm
-				c.log.Debug("Handling 'Convert/Compile' dialog")
-				_ = c.windowMgr.SetForeground(ev.Hwnd)
-				time.Sleep(timeouts.DialogResponseDelay)
-				c.keyboard.SendEnter()
-				c.log.Info("Auto-confirmed save prompt")
-
-			case dialogCommentedOutSymbols:
-				// Confirmation dialog - auto-confirm
-				c.log.Debug("Handling 'Commented out Symbols and/or Devices' dialog")
-				_ = c.windowMgr.SetForeground(ev.Hwnd)
-				time.Sleep(timeouts.DialogResponseDelay)
-				c.keyboard.SendEnter()
-				c.log.Info("Auto-confirmed commented symbols dialog")
-
 			case dialogCompiling:
 				// Compilation in progress
 				if !compilingDetected {
-					c.log.Debug("Detected 'Compiling...' dialog")
-
-					if opts.RecompileAll {
-						c.log.Info("Compiling program... (Recompile All)")
-					} else {
-						c.log.Info("Compiling program...")
-					}
-
+					c.log.Debug("Detected 'VisionTools Pro-e Compiling...' dialog")
+					c.log.Info("Compiling program...")
 					compilingDetected = true
+					compilingDialogHwnd = ev.Hwnd
 				}
+			}
 
-			case dialogCompileComplete:
-				// Compilation finished - parse results
-				if !compileCompleteDetected {
-					c.log.Debug("Detected 'Compile Complete' dialog - parsing results")
-					compileCompleteHwnd = ev.Hwnd
+		case <-ticker.C:
+			// Periodically check if compiling dialog has disappeared (VTPro-specific)
+			if compilingDetected && !compileCompleteDetected && compilingDialogHwnd != 0 {
+				// Poll to see if the compiling dialog still exists
+				if !c.windowMgr.IsWindowValid(compilingDialogHwnd) {
+					c.log.Debug("Compiling dialog disappeared - compilation complete")
+					c.log.Info("Compilation finished, reading results...")
 
-					// Parse statistics from dialog
-					childInfos := c.windowMgr.CollectChildInfos(ev.Hwnd)
-					for _, ci := range childInfos {
-						text := strings.ReplaceAll(ci.Text, "\r\n", "\n")
-						lines := strings.Split(text, "\n")
+					// Give UI a moment to update
+					time.Sleep(500 * time.Millisecond)
 
-						for _, line := range lines {
-							line = strings.TrimSpace(line)
-							if line == "" {
-								continue
-							}
-
-							if n, ok := ParseStatLine(line, "Program Warnings"); ok {
-								result.Warnings = n
-							}
-
-							if n, ok := ParseStatLine(line, "Program Notices"); ok {
-								result.Notices = n
-							}
-
-							if n, ok := ParseStatLine(line, "Program Errors"); ok {
-								result.Errors = n
-							}
-
-							if secs, ok := ParseCompileTimeLine(line); ok {
-								result.CompileTime = secs
-							}
-						}
+					// Read Message Log from main window
+					logText := c.readMessageLog(opts.Hwnd)
+					if logText != "" {
+						c.parseVTProOutput(logText, result)
+					} else {
+						c.log.Warn("Could not read Message Log contents")
 					}
 
 					compileCompleteDetected = true
 				}
-
-			case dialogProgramCompilation:
-				// Detailed error/warning/notice messages
-				if programCompHwnd == 0 {
-					c.log.Debug("Detected 'Program Compilation' dialog")
-					c.log.Info("Gathering details...")
-					programCompHwnd = ev.Hwnd
-				}
-
-			case dialogOperationComplete:
-				// Sometimes appears - close it
-				c.log.Debug("Detected 'Operation Complete' dialog - closing")
-				c.windowMgr.CloseWindow(ev.Hwnd, ev.Title)
-				time.Sleep(timeouts.WindowMessageDelay)
 			}
 
-			// If we have both "Compile Complete" and (optionally) "Program Compilation", we're done
+			// If we have detected compilation complete, we're done
 			if compileCompleteDetected {
-				// If there are warnings/notices/errors, wait briefly for Program Compilation dialog
-				if (result.Warnings > 0 || result.Notices > 0 || result.Errors > 0) && programCompHwnd == 0 {
-					time.Sleep(500 * time.Millisecond)
-					continue
-				}
-
-				// Parse detailed messages if we have the Program Compilation dialog
-				if programCompHwnd != 0 {
-					result.WarningMessages, result.NoticeMessages, result.ErrorMessages = c.parseDetailedMessages(programCompHwnd)
-
-					// Log the messages
-					c.logCompilationMessages(result.ErrorMessages, result.WarningMessages, result.NoticeMessages)
-				}
-
 				// Set HasErrors flag
 				result.HasErrors = result.Errors > 0 || len(result.ErrorMessages) > 0
 
@@ -406,20 +294,20 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 			}
 
 		case <-timeout.C:
-			c.log.Error("Compilation timeout: did not complete within 5 minutes")
+			c.log.Error("Compilation timeout: compilation did not complete within 5 minutes")
 			return opts.Hwnd, &CompileResult{
 				Errors:    1,
 				HasErrors: true,
 				ErrorMessages: []string{
-					"Compilation timeout: did not detect 'Compile Complete' dialog within 5 minutes",
+					"Compilation timeout: compilation did not complete within 5 minutes",
 				},
-			}, fmt.Errorf("compilation timeout: did not detect 'Compile Complete' dialog within 5 minutes")
+			}, fmt.Errorf("compilation timeout: compilation did not complete within 5 minutes")
 		}
 	}
 }
 
 // parseDetailedMessages extracts error/warning/notice messages from Program Compilation dialog
-func (c *Compiler) parseDetailedMessages(hwnd uintptr) (warnings, notices, errors []string) {
+func (c *Compiler) parseDetailedMessages(hwnd uintptr) (warnings, errors []string) {
 	childInfos := c.windowMgr.CollectChildInfos(hwnd)
 
 	var lastType string // Track the type of the last message: "ERROR", "WARNING", or "NOTICE"
@@ -444,9 +332,6 @@ func (c *Compiler) parseDetailedMessages(hwnd uintptr) (warnings, notices, error
 			case strings.HasPrefix(lineUpper, "WARNING\t") || strings.HasPrefix(lineUpper, "WARNING "):
 				warnings = append(warnings, line)
 				lastType = msgTypeWarning
-			case strings.HasPrefix(lineUpper, "NOTICE\t") || strings.HasPrefix(lineUpper, "NOTICE "):
-				notices = append(notices, line)
-				lastType = msgTypeNotice
 			default:
 				// Continuation of previous message - append to the last type that was seen
 				switch lastType {
@@ -458,20 +343,16 @@ func (c *Compiler) parseDetailedMessages(hwnd uintptr) (warnings, notices, error
 					if len(warnings) > 0 {
 						warnings[len(warnings)-1] += " " + line
 					}
-				case msgTypeNotice:
-					if len(notices) > 0 {
-						notices[len(notices)-1] += " " + line
-					}
 				}
 			}
 		}
 	}
 
-	return warnings, notices, errors
+	return warnings, errors
 }
 
 // logCompilationMessages logs error/warning/notice messages with proper formatting
-func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs, noticeMsgs []string) {
+func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs []string) {
 	if len(errorMsgs) > 0 {
 		c.log.Info("")
 		c.log.Info("Error messages:")
@@ -496,20 +377,8 @@ func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs, noticeMsgs []s
 		}
 	}
 
-	if len(noticeMsgs) > 0 {
-		c.log.Info("")
-		c.log.Info("Notice messages:")
-		for i, msg := range noticeMsgs {
-			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
-				slog.Int("number", i+1),
-				slog.String("type", "notice"),
-				slog.String("message", msg),
-			)
-		}
-	}
-
 	// Add trailing blank line if any messages were displayed
-	if len(errorMsgs) > 0 || len(warningMsgs) > 0 || len(noticeMsgs) > 0 {
+	if len(errorMsgs) > 0 || len(warningMsgs) > 0 {
 		c.log.Info("")
 	}
 }
@@ -530,10 +399,10 @@ func (c *Compiler) handlePreCompilationDialogs() error {
 
 			// Handle dialogs that may block compilation
 			switch ev.Title {
-			case dialogOperationComplete:
-				c.log.Debug("Detected 'Operation Complete' dialog - closing")
-				c.log.Info("Handling pre-compilation 'Operation Complete' dialog")
-				c.windowMgr.CloseWindow(ev.Hwnd, dialogOperationComplete)
+			case dialogVTProWarning:
+				c.log.Debug("Detected VTPro warning dialog - closing")
+				c.log.Info("Handling pre-compilation warning dialog")
+				c.windowMgr.CloseWindow(ev.Hwnd, dialogVTProWarning)
 				time.Sleep(timeouts.WindowMessageDelay)
 
 			default:
@@ -561,23 +430,98 @@ func (c *Compiler) handlePostCompilationEvents() error {
 			slog.Uint64("hwnd", uint64(ev.Hwnd)))
 
 		// Only handle Confirmation dialog here
-		if ev.Title == dialogConfirmation {
-			c.log.Debug("Detected 'Confirmation' dialog - clicking No")
-			c.log.Info("Handling confirmation dialog")
+		// if ev.Title == dialogConfirmation {
+		// 	c.log.Debug("Detected 'Confirmation' dialog - clicking No")
+		// 	c.log.Info("Handling confirmation dialog")
 
-			if c.controlReader.FindAndClickButton(ev.Hwnd, "&No") {
-				c.log.Debug("Successfully clicked 'No' button")
-				time.Sleep(timeouts.WindowMessageDelay)
-			} else {
-				c.log.Warn("Could not find 'No' button, trying to close dialog")
-				c.windowMgr.CloseWindow(ev.Hwnd, "Confirmation dialog")
-				time.Sleep(timeouts.WindowMessageDelay)
-			}
-		}
+		// 	if c.controlReader.FindAndClickButton(ev.Hwnd, "&No") {
+		// 		c.log.Debug("Successfully clicked 'No' button")
+		// 		time.Sleep(timeouts.WindowMessageDelay)
+		// 	} else {
+		// 		time.Sleep(timeouts.WindowMessageDelay)
+		// 	}
+		// }
 
 	case <-timeout.C:
 		// Timeout is fine - dialog may not appear
 	}
 
 	return nil
+}
+
+// readMessageLog finds and reads the Message Log child window in VTPro
+func (c *Compiler) readMessageLog(mainHwnd uintptr) string {
+	c.log.Debug("Reading Message Log from main window")
+
+	childInfos := c.windowMgr.CollectChildInfos(mainHwnd)
+
+	// Look for a child control with "Message Log" text or that contains compilation output
+	for _, ci := range childInfos {
+		c.log.Trace("Checking child control",
+			slog.String("class", ci.ClassName),
+			slog.String("text", ci.Text),
+		)
+
+		// Look for compilation output markers
+		if strings.Contains(ci.Text, "Compiling for") ||
+			strings.Contains(ci.Text, "Successful") ||
+			strings.Contains(ci.Text, "error(s)") {
+			c.log.Debug("Found Message Log content",
+				slog.String("className", ci.ClassName),
+				slog.Int("textLength", len(ci.Text)),
+			)
+			return ci.Text
+		}
+	}
+
+	c.log.Warn("Could not find Message Log control")
+	return ""
+}
+
+// parseVTProOutput parses VTPro compilation output format
+// Example format:
+// ---------- Compiling for TSW-770: [...] ---------
+// Boot
+// ~DummyFlashPage - [ not compiled ]
+// ...
+// ---------- Successful ---------
+// 0 warning(s), 0 error(s)
+func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
+	c.log.Debug("Parsing VTPro output", slog.Int("textLength", len(text)))
+
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Look for the summary line: "0 warning(s), 0 error(s)"
+		// or "X warning(s), Y error(s)"
+		if strings.Contains(line, "warning(s)") && strings.Contains(line, "error(s)") {
+			c.log.Debug("Found summary line", slog.String("line", line))
+
+			// Parse: "0 warning(s), 0 error(s)"
+			pattern := regexp.MustCompile(`(\d+)\s+warning\(s\),\s+(\d+)\s+error\(s\)`)
+			matches := pattern.FindStringSubmatch(line)
+
+			if len(matches) >= 3 {
+				if warnings, err := fmt.Sscanf(matches[1], "%d", &result.Warnings); err == nil {
+					c.log.Debug("Parsed warnings", slog.Int("warnings", result.Warnings))
+					_ = warnings
+				}
+
+				if errors, err := fmt.Sscanf(matches[2], "%d", &result.Errors); err == nil {
+					c.log.Debug("Parsed errors", slog.Int("errors", result.Errors))
+					_ = errors
+				}
+			}
+		}
+	}
+
+	c.log.Debug("Parse complete",
+		slog.Int("warnings", result.Warnings),
+		slog.Int("errors", result.Errors),
+	)
 }

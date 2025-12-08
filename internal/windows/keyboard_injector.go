@@ -37,30 +37,6 @@ func (k *keyboardInjector) SendF12() {
 	_, _, _ = procKeybd_event.Call(vkCode, 0, 0x1|0x2, 0) // KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
 }
 
-// SendAltF12 sends the Alt+F12 key combination
-func (k *keyboardInjector) SendAltF12() {
-	// VK_MENU (Alt) = 0x12
-	// VK_F12 = 0x7B
-	vkAlt := uintptr(0x12)
-	vkF12 := uintptr(0x7B)
-
-	// Note: keybd_event has void return type, no error checking needed
-	k.log.Debug("Sending Alt KEYDOWN")
-	_, _, _ = procKeybd_event.Call(vkAlt, 0, 0x1, 0) // KEYEVENTF_EXTENDEDKEY
-	time.Sleep(timeouts.KeystrokeDelay)
-
-	k.log.Debug("Sending F12 KEYDOWN")
-	_, _, _ = procKeybd_event.Call(vkF12, 0, 0x1, 0) // KEYEVENTF_EXTENDEDKEY
-	time.Sleep(timeouts.KeystrokeDelay)
-
-	k.log.Debug("Sending F12 KEYUP")
-	_, _, _ = procKeybd_event.Call(vkF12, 0, 0x1|0x2, 0) // KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
-	time.Sleep(timeouts.KeystrokeDelay)
-
-	k.log.Debug("Sending Alt KEYUP")
-	_, _, _ = procKeybd_event.Call(vkAlt, 0, 0x1|0x2, 0) // KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
-}
-
 // SendEnter sends the Enter key
 func (k *keyboardInjector) SendEnter() {
 	// VK_RETURN = 0x0D
@@ -104,61 +80,6 @@ func (k *keyboardInjector) SendF12ToWindow(hwnd uintptr) bool {
 	return true
 }
 
-// SendAltF12ToWindow sends Alt+F12 key directly to a specific window using SendMessage
-func (k *keyboardInjector) SendAltF12ToWindow(hwnd uintptr) bool {
-	k.log.Debug("Sending Alt+F12 to window via SendMessage", slog.Uint64("hwnd", uint64(hwnd)))
-
-	// lParam construction
-	const scanCodeAlt = 0x38
-	const scanCodeF12 = 0x58
-
-	// Alt key down (context code bit 29 = 1 for Alt)
-	lParamAltDown := uintptr(1 | (scanCodeAlt << 16) | (1 << 24) | (1 << 29))
-
-	// F12 down while Alt is held (context code bit 29 = 1)
-	lParamF12Down := uintptr(1 | (scanCodeF12 << 16) | (1 << 24) | (1 << 29))
-
-	// F12 up (transition bit 31 = 1, previous state bit 30 = 1, context code bit 29 = 1)
-	lParamF12Up := uintptr(1 | (scanCodeF12 << 16) | (1 << 24) | (1 << 29) | (1 << 30) | (1 << 31))
-
-	// Alt up (transition bit 31 = 1, previous state bit 30 = 1, context code bit 29 = 1)
-	lParamAltUp := uintptr(1 | (scanCodeAlt << 16) | (1 << 24) | (1 << 29) | (1 << 30) | (1 << 31))
-
-	// Send Alt down
-	k.log.Debug("Sending WM_SYSKEYDOWN (Alt)")
-	ret, _, err := procSendMessageW.Call(hwnd, WM_SYSKEYDOWN, VK_MENU, lParamAltDown)
-	if ret == 0 {
-		k.log.Debug("SendMessage WM_SYSKEYDOWN Alt failed", slog.Any("error", err))
-	}
-	time.Sleep(timeouts.KeystrokeDelay)
-
-	// Send F12 down
-	k.log.Debug("Sending WM_SYSKEYDOWN (F12)")
-	ret, _, err = procSendMessageW.Call(hwnd, WM_SYSKEYDOWN, VK_F12, lParamF12Down)
-	if ret == 0 {
-		k.log.Debug("SendMessage WM_SYSKEYDOWN F12 failed", slog.Any("error", err))
-	}
-	time.Sleep(timeouts.KeystrokeDelay)
-
-	// Send F12 up
-	k.log.Debug("Sending WM_SYSKEYUP (F12)")
-	ret, _, err = procSendMessageW.Call(hwnd, WM_SYSKEYUP, VK_F12, lParamF12Up)
-	if ret == 0 {
-		k.log.Debug("SendMessage WM_SYSKEYUP F12 failed", slog.Any("error", err))
-	}
-	time.Sleep(timeouts.KeystrokeDelay)
-
-	// Send Alt up
-	k.log.Debug("Sending WM_SYSKEYUP (Alt)")
-	ret, _, err = procSendMessageW.Call(hwnd, WM_SYSKEYUP, VK_MENU, lParamAltUp)
-	if ret == 0 {
-		k.log.Debug("SendMessage WM_SYSKEYUP Alt failed", slog.Any("error", err))
-	}
-
-	k.log.Debug("Alt+F12 sent via SendMessage (synchronous)")
-	return true
-}
-
 // SendF12WithSendInput sends F12 key using SendInput API (more modern than keybd_event)
 func (k *keyboardInjector) SendF12WithSendInput() bool {
 	k.log.Debug("Sending F12 via SendInput")
@@ -191,52 +112,5 @@ func (k *keyboardInjector) SendF12WithSendInput() bool {
 	}
 
 	k.log.Debug("F12 sent via SendInput successfully")
-	return true
-}
-
-// SendAltF12WithSendInput sends Alt+F12 key using SendInput API
-func (k *keyboardInjector) SendAltF12WithSendInput() bool {
-	k.log.Debug("Sending Alt+F12 via SendInput")
-
-	// Create INPUT structures for Alt down, F12 down, F12 up, Alt up
-	inputs := make([]INPUT, 4)
-
-	// Alt KEYDOWN
-	inputs[0].Type = INPUT_KEYBOARD
-	kb0 := (*KEYBDINPUT)(unsafe.Pointer(&inputs[0].Data[0]))
-	kb0.WVk = VK_MENU
-	kb0.DwFlags = KEYEVENTF_EXTENDEDKEY
-
-	// F12 KEYDOWN
-	inputs[1].Type = INPUT_KEYBOARD
-	kb1 := (*KEYBDINPUT)(unsafe.Pointer(&inputs[1].Data[0]))
-	kb1.WVk = VK_F12
-	kb1.DwFlags = KEYEVENTF_EXTENDEDKEY
-
-	// F12 KEYUP
-	inputs[2].Type = INPUT_KEYBOARD
-	kb2 := (*KEYBDINPUT)(unsafe.Pointer(&inputs[2].Data[0]))
-	kb2.WVk = VK_F12
-	kb2.DwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
-
-	// Alt KEYUP
-	inputs[3].Type = INPUT_KEYBOARD
-	kb3 := (*KEYBDINPUT)(unsafe.Pointer(&inputs[3].Data[0]))
-	kb3.WVk = VK_MENU
-	kb3.DwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
-
-	// Send all inputs
-	ret, _, _ := procSendInput.Call(
-		uintptr(len(inputs)),
-		uintptr(unsafe.Pointer(&inputs[0])),
-		uintptr(unsafe.Sizeof(INPUT{})),
-	)
-
-	if ret != uintptr(len(inputs)) {
-		k.log.Warn("SendInput failed", slog.Uint64("expected", uint64(len(inputs))), slog.Uint64("sent", uint64(ret)))
-		return false
-	}
-
-	k.log.Debug("Alt+F12 sent via SendInput successfully")
 	return true
 }

@@ -5,22 +5,19 @@ import "github.com/spf13/cobra"
 
 // Config holds all application configuration
 type Config struct {
-	Verbose      bool
-	RecompileAll bool
-	ShowLogs     bool
+	Verbose  bool
+	ShowLogs bool
 }
 
 // NewConfigFromFlags creates a Config from parsed command flags
 func NewConfigFromFlags(cmd *cobra.Command) *Config {
 	// Try to get from local flags first, fall back to persistent flags
 	verbose := getBoolFlag(cmd, "verbose")
-	recompileAll := getBoolFlag(cmd, "recompile-all")
 	showLogs := getBoolFlag(cmd, "logs")
 
 	return &Config{
-		Verbose:      verbose,
-		RecompileAll: recompileAll,
-		ShowLogs:     showLogs,
+		Verbose:  verbose,
+		ShowLogs: showLogs,
 	}
 }
 

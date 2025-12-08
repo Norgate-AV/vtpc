@@ -16,11 +16,14 @@ func TestCompiler_SuccessfulCompilation(t *testing.T) {
 	testutil.SetupMonitorChannel()
 	defer testutil.CleanupMonitorChannel()
 
+	// VTPro format: Message Log window with compilation results
+	vtproOutput := "---------- Compiling for TSW-770: [test.vtp] ---------\nBoot\nMain\n---------- Successful ---------\n0 warning(s), 0 error(s)"
+
 	mockWin := testutil.NewMockWindowManager().
-		WithChildInfosForHwnd(0x2222, // Compile Complete dialog
-			windows.ChildInfo{ClassName: "Static", Text: "Statistics"},
-			windows.ChildInfo{ClassName: "Edit", Text: "Program Errors: 0\r\nProgram Warnings: 0\r\nProgram Notices: 0\r\nCompile Time: 1.23 seconds\r\n"},
-		)
+		WithChildInfosForHwnd(0x9999, // Main VTPro window
+			windows.ChildInfo{ClassName: "ListBox", Text: vtproOutput},
+		).
+		WithWindowValid(0x1111, false) // Compiling dialog will be invalid after compilation
 
 	mockKbd := testutil.NewMockKeyboardInjector()
 	mockCtrl := testutil.NewMockControlReader()
@@ -37,17 +40,13 @@ func TestCompiler_SuccessfulCompilation(t *testing.T) {
 	compiler := NewCompilerWithDeps(log, deps)
 	opts := CompileOptions{
 		Hwnd:                          0x9999,
-		RecompileAll:                  false,
-		SimplPid:                      1234,
+		VTProPid:                      1234,
 		SkipPreCompilationDialogCheck: true,
 	}
 
-	// Send dialog events that will appear during compilation
-	// IMPORTANT: Must send BEFORE calling Compile() because handlePreCompilationDialogs
-	// checks the channel first
+	// Send VTPro compiling dialog event
 	testutil.SendEventsToMonitor(
-		windows.WindowEvent{Hwnd: 0x1111, Title: "Compiling..."},
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Compile Complete"},
+		windows.WindowEvent{Hwnd: 0x1111, Title: "VisionTools Pro-e Compiling..."},
 	)
 
 	result, err := compiler.Compile(opts)
@@ -56,88 +55,31 @@ func TestCompiler_SuccessfulCompilation(t *testing.T) {
 	assert.False(t, result.HasErrors)
 	assert.Equal(t, 0, result.Errors)
 	assert.Equal(t, 0, result.Warnings)
-	assert.Equal(t, 0, result.Notices)
-	assert.InDelta(t, 1.23, result.CompileTime, 0.01)
 
-	// Verify F12 was sent (new SendInput method should be called)
+	// Verify F12 was sent
 	assert.True(t, mockKbd.SendF12WithSendInputCalled)
-	assert.False(t, mockKbd.SendAltF12WithSendInputCalled)
-	assert.False(t, mockKbd.SendF12Called) // Old method should not be called when SendInput succeeds
 
 	// Verify window was set to foreground
 	assert.Len(t, mockWin.SetForegroundCalls, 1)
 	assert.Equal(t, uintptr(0x9999), mockWin.SetForegroundCalls[0])
 
-	// Verify both Compile Complete dialog and VTPro were closed
-	assert.Len(t, mockWin.CloseWindowCalls, 2)
-	assert.Equal(t, uintptr(0x2222), mockWin.CloseWindowCalls[0].Hwnd) // Compile Complete
-	assert.Equal(t, "Compile Complete dialog", mockWin.CloseWindowCalls[0].Title)
-	assert.Equal(t, uintptr(0x9999), mockWin.CloseWindowCalls[1].Hwnd) // VTPro
-	assert.Equal(t, "VTPro", mockWin.CloseWindowCalls[1].Title)
-}
-
-func TestCompiler_RecompileAll(t *testing.T) {
-	testutil.SetupMonitorChannel()
-	defer testutil.CleanupMonitorChannel()
-
-	mockWin := testutil.NewMockWindowManager().
-		WithChildInfosForHwnd(0x2222,
-			windows.ChildInfo{ClassName: "Edit", Text: "Errors: 0\r\nWarnings: 0\r\nNotices: 0\r\n"},
-		)
-
-	mockKbd := testutil.NewMockKeyboardInjector()
-	mockCtrl := testutil.NewMockControlReader()
-	mockProc := testutil.NewMockProcessManager().WithPid(1234)
-
-	log := logger.NewNoOpLogger()
-	deps := &CompileDependencies{
-		ProcessMgr:    mockProc,
-		WindowMgr:     mockWin,
-		Keyboard:      mockKbd,
-		ControlReader: mockCtrl,
-	}
-
-	compiler := NewCompilerWithDeps(log, deps)
-
-	opts := CompileOptions{
-		Hwnd:                          0x9999,
-		RecompileAll:                  true, // Trigger Alt+F12 instead of F12
-		SimplPid:                      1234,
-		SkipPreCompilationDialogCheck: true,
-	}
-
-	testutil.SendEventsToMonitor(
-		windows.WindowEvent{Hwnd: 0x1111, Title: "Compiling..."},
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Compile Complete"},
-	)
-
-	result, err := compiler.Compile(opts)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.False(t, result.HasErrors)
-
-	// Verify Alt+F12 was sent (new SendInput method should be called)
-	assert.False(t, mockKbd.SendF12WithSendInputCalled)
-	assert.True(t, mockKbd.SendAltF12WithSendInputCalled)
-	assert.False(t, mockKbd.SendAltF12Called) // Old method should not be called when SendInput succeeds
+	// Verify VTPro was closed
+	assert.Len(t, mockWin.CloseWindowCalls, 1)
+	assert.Equal(t, uintptr(0x9999), mockWin.CloseWindowCalls[0].Hwnd)
+	assert.Equal(t, "VTPro", mockWin.CloseWindowCalls[0].Title)
 }
 
 func TestCompiler_WithWarnings(t *testing.T) {
 	testutil.SetupMonitorChannel()
 	defer testutil.CleanupMonitorChannel()
 
+	vtproOutput := "---------- Compiling for TSW-770: [test.vtp] ---------\nBoot\nMain\n---------- Successful ---------\n2 warning(s), 0 error(s)"
+
 	mockWin := testutil.NewMockWindowManager().
-		WithChildInfosForHwnd(0x2222, // Compile Complete dialog
-			windows.ChildInfo{ClassName: "Edit", Text: "Program Errors: 0\r\nProgram Warnings: 2\r\nProgram Notices: 1\r\n"},
+		WithChildInfosForHwnd(0x9999,
+			windows.ChildInfo{ClassName: "ListBox", Text: vtproOutput},
 		).
-		WithChildInfosForHwnd(0x3333, // Program Compilation dialog
-			windows.ChildInfo{ClassName: "ListBox", Items: []string{
-				"WARNING    (LGCMCVT102) ** Signal foo has no driving source",
-				"WARNING    (LGCMCVT102) ** Signal bar has no driving source",
-				"NOTICE     (LGCMCVT103) ** Signal baz has no destination",
-			}},
-		)
+		WithWindowValid(0x1111, false)
 
 	mockKbd := testutil.NewMockKeyboardInjector()
 	mockCtrl := testutil.NewMockControlReader()
@@ -155,14 +97,12 @@ func TestCompiler_WithWarnings(t *testing.T) {
 
 	opts := CompileOptions{
 		Hwnd:                          0x9999,
-		SimplPid:                      1234,
+		VTProPid:                      1234,
 		SkipPreCompilationDialogCheck: true,
 	}
 
 	testutil.SendEventsToMonitor(
-		windows.WindowEvent{Hwnd: 0x1111, Title: "Compiling..."},
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Compile Complete"},
-		windows.WindowEvent{Hwnd: 0x3333, Title: "Program Compilation"},
+		windows.WindowEvent{Hwnd: 0x1111, Title: "VisionTools Pro-e Compiling..."},
 	)
 
 	result, err := compiler.Compile(opts)
@@ -172,27 +112,19 @@ func TestCompiler_WithWarnings(t *testing.T) {
 	assert.False(t, result.HasErrors)
 	assert.Equal(t, 0, result.Errors)
 	assert.Equal(t, 2, result.Warnings)
-	assert.Equal(t, 1, result.Notices)
-	assert.Len(t, result.WarningMessages, 2)
-	assert.Len(t, result.NoticeMessages, 1)
-	assert.Len(t, result.ErrorMessages, 0)
 }
 
 func TestCompiler_WithErrors(t *testing.T) {
 	testutil.SetupMonitorChannel()
 	defer testutil.CleanupMonitorChannel()
 
+	vtproOutput := "---------- Compiling for TSW-770: [test.vtp] ---------\nBoot\nMain\n---------- Failed ---------\n0 warning(s), 3 error(s)"
+
 	mockWin := testutil.NewMockWindowManager().
-		WithChildInfosForHwnd(0x2222, // Compile Complete dialog
-			windows.ChildInfo{ClassName: "Edit", Text: "Program Errors: 3\r\nProgram Warnings: 0\r\nProgram Notices: 0\r\n"},
+		WithChildInfosForHwnd(0x9999,
+			windows.ChildInfo{ClassName: "ListBox", Text: vtproOutput},
 		).
-		WithChildInfosForHwnd(0x3333, // Program Compilation dialog
-			windows.ChildInfo{ClassName: "ListBox", Items: []string{
-				"ERROR      (LGSPLS1700) Line 5: Undefined symbol 'foo'",
-				"ERROR      (LGCMCVT247) Line 15: Type mismatch",
-				"ERROR      (LGCMCVT101) Line 25: Missing semicolon",
-			}},
-		)
+		WithWindowValid(0x1111, false)
 
 	mockKbd := testutil.NewMockKeyboardInjector()
 	mockCtrl := testutil.NewMockControlReader()
@@ -210,14 +142,12 @@ func TestCompiler_WithErrors(t *testing.T) {
 
 	opts := CompileOptions{
 		Hwnd:                          0x9999,
-		SimplPid:                      1234,
+		VTProPid:                      1234,
 		SkipPreCompilationDialogCheck: true,
 	}
 
 	testutil.SendEventsToMonitor(
-		windows.WindowEvent{Hwnd: 0x1111, Title: "Compiling..."},
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Compile Complete"},
-		windows.WindowEvent{Hwnd: 0x3333, Title: "Program Compilation"},
+		windows.WindowEvent{Hwnd: 0x1111, Title: "VisionTools Pro-e Compiling..."},
 	)
 
 	result, err := compiler.Compile(opts)
@@ -229,51 +159,6 @@ func TestCompiler_WithErrors(t *testing.T) {
 	assert.True(t, result.HasErrors)
 	assert.Equal(t, 3, result.Errors)
 	assert.Equal(t, 0, result.Warnings)
-	assert.Equal(t, 0, result.Notices)
-	assert.Len(t, result.ErrorMessages, 3)
-}
-
-func TestCompiler_IncompleteSymbols(t *testing.T) {
-	testutil.SetupMonitorChannel()
-	defer testutil.CleanupMonitorChannel()
-
-	mockWin := testutil.NewMockWindowManager().
-		WithChildInfos(
-			windows.ChildInfo{ClassName: "Edit", Text: "The program contains incomplete symbols and cannot be compiled."},
-		)
-
-	mockKbd := testutil.NewMockKeyboardInjector()
-	mockCtrl := testutil.NewMockControlReader()
-	mockProc := testutil.NewMockProcessManager().WithPid(1234)
-
-	log := logger.NewNoOpLogger()
-	deps := &CompileDependencies{
-		ProcessMgr:    mockProc,
-		WindowMgr:     mockWin,
-		Keyboard:      mockKbd,
-		ControlReader: mockCtrl,
-	}
-
-	compiler := NewCompilerWithDeps(log, deps)
-
-	opts := CompileOptions{
-		Hwnd:                          0x9999,
-		SimplPid:                      1234,
-		SkipPreCompilationDialogCheck: true,
-	}
-
-	testutil.SendEventsToMonitor(
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Incomplete Symbols"},
-	)
-
-	result, err := compiler.Compile(opts)
-
-	assert.Error(t, err)
-	assert.NotNil(t, result)
-	assert.Contains(t, err.Error(), "incomplete symbols")
-	assert.True(t, result.HasErrors)
-	assert.Equal(t, 1, result.Errors)
-	assert.Len(t, result.ErrorMessages, 1)
 }
 
 func TestCompiler_CompileDialogTimeout(t *testing.T) {
@@ -298,7 +183,7 @@ func TestCompiler_CompileDialogTimeout(t *testing.T) {
 
 	opts := CompileOptions{
 		Hwnd:                          0x9999,
-		SimplPid:                      1234,
+		VTProPid:                      1234,
 		SkipPreCompilationDialogCheck: true,
 		CompilationTimeout:            1 * time.Second, // Fast timeout for testing
 	}
@@ -309,7 +194,7 @@ func TestCompiler_CompileDialogTimeout(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.NotNil(t, result)
-	assert.Contains(t, err.Error(), "Compile Complete")
+	assert.Contains(t, err.Error(), "compilation did not complete")
 	assert.True(t, result.HasErrors)
 	assert.Equal(t, 1, result.Errors)
 	assert.Len(t, result.ErrorMessages, 1)
@@ -320,9 +205,11 @@ func TestCompiler_NoPid(t *testing.T) {
 	defer testutil.CleanupMonitorChannel()
 
 	// When PID is 0, dialog monitoring should be skipped but compilation should still proceed
+	compilingDialogHwnd := uintptr(0x1111)
 	mockWin := testutil.NewMockWindowManager().
-		WithChildInfos(
-			windows.ChildInfo{ClassName: "Edit", Text: "Errors: 0\r\nWarnings: 0\r\nNotices: 0\r\n"},
+		WithWindowValid(compilingDialogHwnd, false). // Dialog starts invalid since we skip monitoring
+		WithChildInfosForHwnd(0x9999,
+			windows.ChildInfo{ClassName: "ListBox", Items: []string{"0 warning(s), 0 error(s)"}},
 		)
 
 	mockKbd := testutil.NewMockKeyboardInjector()
@@ -341,14 +228,13 @@ func TestCompiler_NoPid(t *testing.T) {
 
 	opts := CompileOptions{
 		Hwnd:                          0x9999,
-		SimplPid:                      0, // No PID available
+		VTProPid:                      0, // No PID available
 		SkipPreCompilationDialogCheck: true,
 	}
 
 	// PID=0 means no monitoring, so don't send events
 	testutil.SendEventsToMonitor(
-		windows.WindowEvent{Hwnd: 0x1111, Title: "Compiling..."},
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Compile Complete"},
+		windows.WindowEvent{Hwnd: compilingDialogHwnd, Title: "VisionTools Pro-e Compiling..."},
 	)
 
 	result, err := compiler.Compile(opts)
@@ -365,9 +251,11 @@ func TestCompiler_WithSavePrompts(t *testing.T) {
 	testutil.SetupMonitorChannel()
 	defer testutil.CleanupMonitorChannel()
 
+	compilingDialogHwnd := uintptr(0x1111)
 	mockWin := testutil.NewMockWindowManager().
-		WithChildInfos(
-			windows.ChildInfo{ClassName: "Edit", Text: "Errors: 0\r\nWarnings: 0\r\nNotices: 0\r\n"},
+		WithWindowValid(compilingDialogHwnd, true). // Start valid
+		WithChildInfosForHwnd(0x9999,
+			windows.ChildInfo{ClassName: "ListBox", Items: []string{"0 warning(s), 0 error(s)"}},
 		)
 
 	mockKbd := testutil.NewMockKeyboardInjector()
@@ -386,16 +274,19 @@ func TestCompiler_WithSavePrompts(t *testing.T) {
 
 	opts := CompileOptions{
 		Hwnd:                          0x9999,
-		SimplPid:                      1234,
+		VTProPid:                      1234,
 		SkipPreCompilationDialogCheck: true,
 	}
 
-	testutil.SendEventsToMonitor(
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Convert/Compile"},
-		windows.WindowEvent{Hwnd: 0x6666, Title: "Commented Out Symbols"},
-		windows.WindowEvent{Hwnd: 0x1111, Title: "Compiling..."},
-		windows.WindowEvent{Hwnd: 0x2222, Title: "Compile Complete"},
-	)
+	// Simulate compilation workflow with VTPro warning dialog
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		testutil.SendEventsToMonitor(
+			windows.WindowEvent{Hwnd: compilingDialogHwnd, Title: "VisionTools Pro-e Compiling..."},
+		)
+		time.Sleep(200 * time.Millisecond)
+		mockWin.WithWindowValid(compilingDialogHwnd, false) // Dialog closes when compilation complete
+	}()
 
 	result, err := compiler.Compile(opts)
 
@@ -403,6 +294,6 @@ func TestCompiler_WithSavePrompts(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.False(t, result.HasErrors)
 
-	// Verify Enter was sent twice (for save prompts)
-	assert.True(t, mockKbd.SendEnterCalled)
+	// Verify F12 was sent to start compilation (using SendInput method)
+	assert.True(t, mockKbd.SendF12WithSendInputCalled)
 }

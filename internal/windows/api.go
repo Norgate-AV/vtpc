@@ -31,6 +31,7 @@ var (
 	procOpenProcessToken         = kernel32.NewProc("OpenProcessToken")
 	procOpenProcess              = kernel32.NewProc("OpenProcess")
 	procTerminateProcess         = kernel32.NewProc("TerminateProcess")
+	procCreateProcessW           = kernel32.NewProc("CreateProcessW")
 	advapi32                     = syscall.NewLazyDLL("advapi32.dll")
 	procGetTokenInformation      = advapi32.NewProc("GetTokenInformation")
 	user32                       = syscall.NewLazyDLL("user32.dll")
@@ -82,8 +83,10 @@ const (
 )
 
 const (
-	TH32CS_SNAPPROCESS = 0x00000002
-	MAX_PATH           = 260
+	TH32CS_SNAPPROCESS   = 0x00000002
+	MAX_PATH             = 260
+	STARTF_USESHOWWINDOW = 0x00000001
+	CREATE_NEW_CONSOLE   = 0x00000010
 )
 
 // WindowsAPI is a concrete implementation of all Windows-related interfaces
@@ -108,6 +111,10 @@ func (w *WindowsAPI) VerifyForegroundWindow(expectedHwnd uintptr, expectedPid ui
 	return w.client.Window.VerifyForegroundWindow(expectedHwnd, expectedPid)
 }
 func (w *WindowsAPI) IsElevated() bool { return w.client.Window.IsElevated() }
+func (w *WindowsAPI) IsWindowValid(hwnd uintptr) bool {
+	return w.client.Window.IsWindowValid(hwnd)
+}
+
 func (w *WindowsAPI) CollectChildInfos(hwnd uintptr) []ChildInfo {
 	return w.client.Window.CollectChildInfos(hwnd)
 }
@@ -117,23 +124,14 @@ func (w *WindowsAPI) WaitOnMonitor(timeout time.Duration, matchers ...func(Windo
 }
 
 // KeyboardInjector interface implementation
-func (w *WindowsAPI) SendF12()    { w.client.Keyboard.SendF12() }
-func (w *WindowsAPI) SendAltF12() { w.client.Keyboard.SendAltF12() }
-func (w *WindowsAPI) SendEnter()  { w.client.Keyboard.SendEnter() }
+func (w *WindowsAPI) SendF12()   { w.client.Keyboard.SendF12() }
+func (w *WindowsAPI) SendEnter() { w.client.Keyboard.SendEnter() }
 func (w *WindowsAPI) SendF12ToWindow(hwnd uintptr) bool {
 	return w.client.Keyboard.SendF12ToWindow(hwnd)
 }
 
-func (w *WindowsAPI) SendAltF12ToWindow(hwnd uintptr) bool {
-	return w.client.Keyboard.SendAltF12ToWindow(hwnd)
-}
-
 func (w *WindowsAPI) SendF12WithSendInput() bool {
 	return w.client.Keyboard.SendF12WithSendInput()
-}
-
-func (w *WindowsAPI) SendAltF12WithSendInput() bool {
-	return w.client.Keyboard.SendAltF12WithSendInput()
 }
 
 // ControlReader interface implementation

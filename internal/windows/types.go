@@ -87,3 +87,40 @@ type SHELLEXECUTEINFO struct {
 	HIcon        uintptr
 	HProcess     uintptr
 }
+
+// STARTUPINFO for CreateProcess API
+type STARTUPINFO struct {
+	Cb              uint32
+	LpReserved      *uint16
+	LpDesktop       *uint16
+	LpTitle         *uint16
+	DwX             uint32
+	DwY             uint32
+	DwXSize         uint32
+	DwYSize         uint32
+	DwXCountChars   uint32
+	DwYCountChars   uint32
+	DwFillAttribute uint32
+	DwFlags         uint32
+	WShowWindow     uint16
+	CbReserved2     uint16
+	LpReserved2     *byte
+	HStdInput       uintptr
+	HStdOutput      uintptr
+	HStdError       uintptr
+}
+
+// PROCESS_INFORMATION for CreateProcess API
+type PROCESS_INFORMATION struct {
+	HProcess    uintptr
+	HThread     uintptr
+	DwProcessId uint32
+	DwThreadId  uint32
+}
+
+// SECURITY_ATTRIBUTES for CreateProcess API
+type SECURITY_ATTRIBUTES struct {
+	NLength              uint32
+	LpSecurityDescriptor uintptr
+	BInheritHandle       int32
+}

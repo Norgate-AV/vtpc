@@ -23,8 +23,8 @@ import (
 // ExecutionContext holds state needed throughout the compilation process
 // and for cleanup in signal handlers.
 type ExecutionContext struct {
-	simplHwnd   uintptr
-	simplPid    uint32
+	vtproHwnd   uintptr
+	vtproPid    uint32
 	log         logger.LoggerInterface
 	vtproClient *vtpro.Client
 	exitFunc    func(int) // Injectable for testing; defaults to os.Exit
@@ -56,7 +56,6 @@ func init() {
 
 	// Add flags
 	RootCmd.PersistentFlags().BoolP("verbose", "V", false, "enable verbose output")
-	RootCmd.PersistentFlags().BoolP("recompile-all", "r", false, "trigger Recompile All (Alt+F12) instead of Compile (F12)")
 	RootCmd.PersistentFlags().BoolP("logs", "l", false, "print the current log file to stdout and exit")
 }
 
@@ -166,9 +165,9 @@ func launchVTPro(vtproClient *vtpro.Client, absPath string, log logger.LoggerInt
 	// Open the file with VTPro application using elevated privileges
 	// SW_SHOWNORMAL = 1
 	log.Debug("Launching VTPro with file", slog.String("path", absPath))
-	pid, err = windows.ShellExecuteEx(0, "open", vtpro.GetVTProPath(), absPath, "", 1, log)
+	pid, err = windows.CreateProcessSimple(vtpro.GetVTProPath(), fmt.Sprintf("\"%s\"", absPath), 1, log)
 	if err != nil {
-		log.Error("ShellExecuteEx failed", slog.Any("error", err))
+		log.Error("CreateProcessSimple failed", slog.Any("error", err))
 		return 0, 0, nil, fmt.Errorf("error opening file: %w", err)
 	}
 
@@ -197,7 +196,7 @@ func setupSignalHandlers(ctx *ExecutionContext) {
 		)
 
 		ctx.log.Info("Cleaning up after console control event")
-		ctx.vtproClient.ForceCleanup(ctx.simplHwnd, ctx.simplPid)
+		ctx.vtproClient.ForceCleanup(ctx.vtproHwnd, ctx.vtproPid)
 		ctx.log.Debug("Cleanup completed, exiting")
 
 		ctx.exitFunc(130)
@@ -213,7 +212,7 @@ func setupSignalHandlers(ctx *ExecutionContext) {
 		ctx.log.Debug("Received signal", slog.Any("signal", sig))
 		ctx.log.Info("Interrupt signal received, starting cleanup")
 
-		ctx.vtproClient.ForceCleanup(ctx.simplHwnd, ctx.simplPid)
+		ctx.vtproClient.ForceCleanup(ctx.vtproHwnd, ctx.vtproPid)
 
 		ctx.log.Debug("Cleanup completed, exiting")
 		ctx.exitFunc(130)
@@ -252,11 +251,10 @@ func runCompilation(params CompilationParams) (*compiler.CompileResult, error) {
 	comp := compiler.NewCompiler(params.Logger)
 
 	result, err := comp.Compile(compiler.CompileOptions{
-		FilePath:     params.FilePath,
-		RecompileAll: params.Config.RecompileAll,
-		Hwnd:         params.Hwnd,
-		SimplPid:     params.Pid,
-		SimplPidPtr:  params.PidPtr,
+		FilePath:    params.FilePath,
+		Hwnd:        params.Hwnd,
+		VTProPid:    params.Pid,
+		VTProPidPtr: params.PidPtr,
 	})
 	if err != nil {
 		params.Logger.Error("Compilation failed", slog.Any("error", err))
@@ -271,8 +269,6 @@ func displayCompilationResults(result *compiler.CompileResult, log logger.Logger
 	log.Info("Compilation complete",
 		slog.Int("errors", result.Errors),
 		slog.Int("warnings", result.Warnings),
-		slog.Int("notices", result.Notices),
-		slog.String("compileTime", fmt.Sprintf("%.2fs", result.CompileTime)),
 	)
 }
 
@@ -298,7 +294,6 @@ func Execute(cmd *cobra.Command, args []string) error {
 	log.Debug("Starting vtpc", slog.Any("args", args))
 	log.Debug("Flags set",
 		slog.Bool("verbose", cfg.Verbose),
-		slog.Bool("recompileAll", cfg.RecompileAll),
 	)
 
 	// Recover from panics and log them
@@ -342,7 +337,7 @@ func Execute(cmd *cobra.Command, args []string) error {
 
 	// Create execution context to hold state for signal handlers
 	ctx := &ExecutionContext{
-		simplPid:    pid,
+		vtproPid:    pid,
 		log:         log,
 		vtproClient: vtproClient,
 		exitFunc:    os.Exit,
@@ -356,7 +351,7 @@ func Execute(cmd *cobra.Command, args []string) error {
 	}
 
 	// Store hwnd in context for signal handlers and cleanup
-	ctx.simplHwnd = hwnd
+	ctx.vtproHwnd = hwnd
 	log.Debug("Stored hwnd in execution context", slog.Uint64("hwnd", uint64(hwnd)))
 
 	defer vtproClient.Cleanup(hwnd, pid)
@@ -365,7 +360,7 @@ func Execute(cmd *cobra.Command, args []string) error {
 		FilePath: absPath,
 		Hwnd:     hwnd,
 		Pid:      pid,
-		PidPtr:   &ctx.simplPid,
+		PidPtr:   &ctx.vtproPid,
 		Config:   cfg,
 		Logger:   log,
 	})

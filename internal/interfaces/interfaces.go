@@ -13,6 +13,7 @@ type WindowManager interface {
 	SetForeground(hwnd uintptr) bool
 	VerifyForegroundWindow(expectedHwnd uintptr, expectedPid uint32) bool
 	IsElevated() bool
+	IsWindowValid(hwnd uintptr) bool
 	CollectChildInfos(hwnd uintptr) []windows.ChildInfo
 	WaitOnMonitor(timeout time.Duration, matchers ...func(windows.WindowEvent) bool) (windows.WindowEvent, bool)
 }
@@ -20,12 +21,12 @@ type WindowManager interface {
 // KeyboardInjector handles keyboard input
 type KeyboardInjector interface {
 	SendF12()
-	SendAltF12()
+	// SendAltF12()
 	SendEnter()
 	SendF12ToWindow(hwnd uintptr) bool
-	SendAltF12ToWindow(hwnd uintptr) bool
+	// SendAltF12ToWindow(hwnd uintptr) bool
 	SendF12WithSendInput() bool
-	SendAltF12WithSendInput() bool
+	// SendAltF12WithSendInput() bool
 }
 
 // ProcessManager handles SIMPL process operations

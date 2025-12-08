@@ -134,6 +134,70 @@ func ShellExecuteEx(hwnd uintptr, verb, file, args, cwd string, showCmd int, log
 	return uint32(pid), nil
 }
 
+// CreateProcessSimple launches an executable with arguments and returns the process ID
+// This provides direct control over the command line, unlike ShellExecuteEx which
+// may modify arguments based on shell integration and file associations.
+func CreateProcessSimple(exePath, args string, showCmd int, log logger.LoggerInterface) (uint32, error) {
+	// Build the command line: "executable" "arguments"
+	// Windows CreateProcess requires the full command line including the executable
+	var cmdLine string
+	if args != "" {
+		cmdLine = fmt.Sprintf("\"%s\" %s", exePath, args)
+	} else {
+		cmdLine = fmt.Sprintf("\"%s\"", exePath)
+	}
+
+	cmdLinePtr, err := syscall.UTF16PtrFromString(cmdLine)
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert command line to UTF16: %w", err)
+	}
+
+	// Initialize STARTUPINFO
+	si := STARTUPINFO{
+		Cb:          uint32(unsafe.Sizeof(STARTUPINFO{})),
+		DwFlags:     STARTF_USESHOWWINDOW,
+		WShowWindow: uint16(showCmd),
+	}
+
+	// Initialize PROCESS_INFORMATION
+	var pi PROCESS_INFORMATION
+
+	// Call CreateProcessW
+	// lpApplicationName = nil (use command line instead)
+	// lpCommandLine = full command line
+	ret, _, err := procCreateProcessW.Call(
+		0,                                   // lpApplicationName (nil)
+		uintptr(unsafe.Pointer(cmdLinePtr)), // lpCommandLine
+		0,                                   // lpProcessAttributes (nil)
+		0,                                   // lpThreadAttributes (nil)
+		0,                                   // bInheritHandles (FALSE)
+		0,                                   // dwCreationFlags
+		0,                                   // lpEnvironment (nil)
+		0,                                   // lpCurrentDirectory (nil)
+		uintptr(unsafe.Pointer(&si)),        // lpStartupInfo
+		uintptr(unsafe.Pointer(&pi)),        // lpProcessInformation
+	)
+
+	if ret == 0 {
+		return 0, fmt.Errorf("CreateProcessW failed: %w", err)
+	}
+
+	// Close handles - we only need the PID
+	if pi.HThread != 0 {
+		if ret, _, err := ProcCloseHandle.Call(pi.HThread); ret == 0 {
+			log.Debug("Failed to close thread handle", slog.Any("error", err))
+		}
+	}
+
+	if pi.HProcess != 0 {
+		if ret, _, err := ProcCloseHandle.Call(pi.HProcess); ret == 0 {
+			log.Debug("Failed to close process handle", slog.Any("error", err))
+		}
+	}
+
+	return pi.DwProcessId, nil
+}
+
 // GetWindowText retrieves the text of a window
 func GetWindowText(hwnd uintptr) string {
 	buf := make([]uint16, 256)

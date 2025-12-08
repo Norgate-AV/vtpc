@@ -17,6 +17,7 @@ type MockWindowManager struct {
 	ChildInfosMap                map[uintptr][]windows.ChildInfo
 	WaitOnMonitorResults         []WaitOnMonitorResult
 	currentWaitIndex             int
+	WindowValidityMap            map[uintptr]bool
 }
 
 type CloseWindowCall struct {
@@ -39,6 +40,7 @@ func NewMockWindowManager() *MockWindowManager {
 		WaitOnMonitorResults:         []WaitOnMonitorResult{},
 		ChildInfos:                   []windows.ChildInfo{},
 		ChildInfosMap:                make(map[uintptr][]windows.ChildInfo),
+		WindowValidityMap:            make(map[uintptr]bool),
 	}
 }
 
@@ -57,6 +59,13 @@ func (m *MockWindowManager) VerifyForegroundWindow(expectedHwnd uintptr, expecte
 
 func (m *MockWindowManager) IsElevated() bool {
 	return m.IsElevatedResult
+}
+
+func (m *MockWindowManager) IsWindowValid(hwnd uintptr) bool {
+	if valid, exists := m.WindowValidityMap[hwnd]; exists {
+		return valid
+	}
+	return true // default to valid if not explicitly set
 }
 
 func (m *MockWindowManager) CollectChildInfos(hwnd uintptr) []windows.ChildInfo {
@@ -130,6 +139,11 @@ func (m *MockWindowManager) WithChildInfos(infos ...windows.ChildInfo) *MockWind
 
 func (m *MockWindowManager) WithChildInfosForHwnd(hwnd uintptr, infos ...windows.ChildInfo) *MockWindowManager {
 	m.ChildInfosMap[hwnd] = infos
+	return m
+}
+
+func (m *MockWindowManager) WithWindowValid(hwnd uintptr, valid bool) *MockWindowManager {
+	m.WindowValidityMap[hwnd] = valid
 	return m
 }
 
