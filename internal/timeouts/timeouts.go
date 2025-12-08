@@ -1,0 +1,70 @@
+// Package timeouts defines timeout and delay constants for VTPro operations.
+package timeouts
+
+import "time"
+
+const (
+	// VTPro Lifecycle Timeouts
+
+	// WindowAppearTimeout is the maximum time to wait for VTPro to appear
+	// after launching the process. VTPro typically loads within 2 minutes,
+	// but we allow 3 minutes to account for slower systems.
+	WindowAppearTimeout = 3 * time.Minute
+
+	// WindowReadyTimeout is the maximum time to wait for the VTPro UI
+	// to stabilize and become responsive after the window appears.
+	WindowReadyTimeout = 30 * time.Second
+
+	// UISettlingDelay allows time for window animations, focus events, and
+	// UI state to stabilize before interacting with the application.
+	UISettlingDelay = 5 * time.Second
+
+	// FocusVerificationDelay allows time to verify that window focus has
+	// successfully changed after a focus operation.
+	FocusVerificationDelay = 1 * time.Second
+
+	// Windows API Interaction Delays
+
+	// WindowMessageDelay is the delay after sending window messages (WM_CLOSE,
+	// WM_SETFOCUS, etc.) to allow the target application to process the message.
+	WindowMessageDelay = 500 * time.Millisecond
+
+	// KeystrokeDelay is the delay between keyboard events (key down/up) to ensure
+	// the target application reliably receives and processes the input.
+	KeystrokeDelay = 50 * time.Millisecond
+
+	// Compiler Dialog Timeouts
+
+	// CompilationCompleteTimeout is the maximum time to wait for the entire
+	// compilation process to complete, from initiating compile to receiving
+	// the "Compile Complete" dialog. This accounts for large programs that
+	// may take several minutes to compile.
+	CompilationCompleteTimeout = 5 * time.Minute
+
+	// DialogResponseDelay is the delay after sending input to dialog boxes to
+	// allow the dialog to process the input and respond.
+	DialogResponseDelay = 300 * time.Millisecond
+
+	// DialogConfirmationTimeout is the maximum time to wait for a
+	// confirmation dialog to appear.
+	DialogConfirmationTimeout = 2 * time.Second
+
+	// Polling and Verification Intervals
+
+	// StatePollingInterval is the delay between checks in tight polling loops
+	// when actively waiting for state changes (window appearance, readiness,
+	// process discovery, etc.).
+	StatePollingInterval = 100 * time.Millisecond
+
+	// StabilityCheckInterval is the delay between consecutive responsiveness
+	// checks to ensure a window is stable and ready for interaction.
+	StabilityCheckInterval = 500 * time.Millisecond
+
+	// MonitorPollingInterval is the interval at which the background window
+	// monitor checks for new windows and dialog events.
+	MonitorPollingInterval = 500 * time.Millisecond
+
+	// CleanupDelay allows time for windows and processes to close gracefully
+	// before performing verification checks or additional cleanup operations.
+	CleanupDelay = 1 * time.Second
+)

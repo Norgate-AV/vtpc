@@ -1,0 +1,70 @@
+version: 2
+
+project_name: vtpc
+
+before:
+  hooks:
+    - make clean
+    - go generate ./...
+    - go mod tidy
+    - ./scripts/generate-changelog.sh {{ .Tag }}
+    - ./scripts/generate-release-notes.sh {{ .Tag }}
+
+builds:
+  - main: ./main.go
+    binary: vtpc
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    tags:
+      - netgo
+      - osusergo
+    ldflags:
+      - -s -w -buildid= -X github.com/Norgate-AV/vtpc/internal/version.version={{.Version}}
+      - -X github.com/Norgate-AV/vtpc/internal/version.commit={{.Commit}}
+      - -X github.com/Norgate-AV/vtpc/internal/version.date={{.Date}}
+      - -extldflags '-static'
+
+archives:
+  - files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: Norgate-AV
+    name: vtpc
+  draft: false
+  mode: replace
+  footer: |
+    **Full Changelog**: https://github.com/Norgate-AV/vtpc/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+scoops:
+  - name: vtpc
+    repository:
+      owner: Norgate-AV
+      name: scoop-norgateav-crestron
+      token: "{{ .Env.SCOOP_NORGATEAV_CRESTRON }}"
+    directory: bucket
+    homepage: https://github.com/Norgate-AV/vtpc
+    description: "Automate compiling of Crestron VTPro-e programs"
+    license: MIT

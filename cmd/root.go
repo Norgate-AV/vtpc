@@ -1,0 +1,373 @@
+package cmd
+
+import (
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime/debug"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Norgate-AV/vtpc/internal/compiler"
+	"github.com/Norgate-AV/vtpc/internal/logger"
+	"github.com/Norgate-AV/vtpc/internal/timeouts"
+	"github.com/Norgate-AV/vtpc/internal/version"
+	"github.com/Norgate-AV/vtpc/internal/vtpro"
+	"github.com/Norgate-AV/vtpc/internal/windows"
+)
+
+// ExecutionContext holds state needed throughout the compilation process
+// and for cleanup in signal handlers.
+type ExecutionContext struct {
+	simplHwnd   uintptr
+	simplPid    uint32
+	log         logger.LoggerInterface
+	vtproClient *vtpro.Client
+	exitFunc    func(int) // Injectable for testing; defaults to os.Exit
+}
+
+// CompilationParams holds parameters for running compilation
+type CompilationParams struct {
+	FilePath string
+	Hwnd     uintptr
+	Pid      uint32
+	PidPtr   *uint32
+	Config   *Config
+	Logger   logger.LoggerInterface
+}
+
+// RootCmd is the root command for the vtpc CLI application.
+var RootCmd = &cobra.Command{
+	Use:          "vtpc <file-path>",
+	Short:        "vtpc - Automate compilation of .vtp files",
+	Version:      version.GetVersion(),
+	Args:         validateArgs,
+	RunE:         Execute,
+	SilenceUsage: true, // Don't show usage on runtime errors
+}
+
+func init() {
+	// Set custom version template to show full version info
+	RootCmd.SetVersionTemplate(`{{printf "%s\n" .Version}}`)
+
+	// Add flags
+	RootCmd.PersistentFlags().BoolP("verbose", "V", false, "enable verbose output")
+	RootCmd.PersistentFlags().BoolP("recompile-all", "r", false, "trigger Recompile All (Alt+F12) instead of Compile (F12)")
+	RootCmd.PersistentFlags().BoolP("logs", "l", false, "print the current log file to stdout and exit")
+}
+
+// validateArgs validates that a .vtp file argument is provided (if any args given)
+func validateArgs(cmd *cobra.Command, args []string) error {
+	// Allow 0 args for --logs flag, which is handled in Execute
+	if len(args) == 0 {
+		return nil
+	}
+
+	// Validate .vtp file argument
+	if err := cobra.ExactArgs(1)(cmd, args); err != nil {
+		return err
+	}
+
+	if filepath.Ext(args[0]) != ".vtp" {
+		return fmt.Errorf("file must have .vtp extension")
+	}
+
+	return nil
+}
+
+// handleLogsFlag processes the --logs flag and exits if needed
+func handleLogsFlag(cfg *Config, exitFunc func(int)) error {
+	if !cfg.ShowLogs {
+		return nil
+	}
+
+	if err := logger.PrintLogFile(nil, logger.LoggerOptions{}); err != nil {
+		if os.IsNotExist(err) {
+			logPath := logger.GetLogPath(logger.LoggerOptions{})
+			fmt.Fprintf(os.Stderr, "Log file does not exist: %s\n", logPath)
+			exitFunc(1)
+		}
+
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		exitFunc(1)
+	}
+
+	exitFunc(0)
+	return nil // Won't actually reach here due to exitFunc
+}
+
+// initializeLogger creates a logger and logs startup information
+func initializeLogger(cfg *Config) (logger.LoggerInterface, error) {
+	log, err := logger.NewLogger(logger.LoggerOptions{
+		Verbose:  cfg.Verbose,
+		Compress: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logger: %w", err)
+	}
+
+	return log, nil
+}
+
+// ensureElevated checks for admin privileges and relaunches if needed
+func ensureElevated(log logger.LoggerInterface) error {
+	log.Debug("Checking elevation status")
+	if !windows.IsElevated() {
+		log.Info("This program requires administrator privileges")
+		log.Info("Relaunching as administrator")
+
+		if err := windows.RelaunchAsAdmin(); err != nil {
+			log.Error("RelaunchAsAdmin failed", slog.Any("error", err))
+			return fmt.Errorf("error relaunching as admin: %w", err)
+		}
+
+		// Exit this instance, the elevated one will continue
+		log.Debug("Relaunched successfully, exiting non-elevated instance")
+		return nil
+	}
+
+	log.Debug("Running with administrator privileges")
+	return nil
+}
+
+// validateAndResolvePath validates the file exists and returns its absolute path
+func validateAndResolvePath(filePath string, log logger.LoggerInterface) (string, error) {
+	log.Debug("Processing file", slog.String("path", filePath))
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("file does not exist: %s", filePath)
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", fmt.Errorf("error resolving file path: %w", err)
+	}
+
+	return absPath, nil
+}
+
+// launchVTPro launches VTPro, starts monitoring with the PID, and returns cleanup function
+func launchVTPro(vtproClient *vtpro.Client, absPath string, log logger.LoggerInterface) (hwnd uintptr, pid uint32, cleanup func(), err error) {
+	// Open the file with VTPro application using elevated privileges
+	// SW_SHOWNORMAL = 1
+	log.Debug("Launching VTPro with file", slog.String("path", absPath))
+	pid, err = windows.ShellExecuteEx(0, "open", vtpro.GetVTProPath(), absPath, "", 1, log)
+	if err != nil {
+		log.Error("ShellExecuteEx failed", slog.Any("error", err))
+		return 0, 0, nil, fmt.Errorf("error opening file: %w", err)
+	}
+
+	log.Info("VTPro process started", slog.Uint64("pid", uint64(pid)))
+
+	// Start background window monitor with the exact PID we just launched
+	stopMonitor := vtproClient.StartMonitoring(pid)
+	log.Debug("Background window monitor started")
+
+	// Return cleanup function that stops monitor
+	cleanup = func() {
+		stopMonitor()
+	}
+
+	return 0, pid, cleanup, nil
+}
+
+// setupSignalHandlers configures console control and interrupt signal handlers
+// It captures the ExecutionContext in closures to access state for cleanup
+func setupSignalHandlers(ctx *ExecutionContext) {
+	// Set up Windows console control handler to catch window close events
+	_ = windows.SetConsoleCtrlHandler(func(ctrlType uint32) uintptr {
+		ctx.log.Debug("Received console control event",
+			slog.String("type", windows.GetCtrlTypeName(ctrlType)),
+			slog.Uint64("code", uint64(ctrlType)),
+		)
+
+		ctx.log.Info("Cleaning up after console control event")
+		ctx.vtproClient.ForceCleanup(ctx.simplHwnd, ctx.simplPid)
+		ctx.log.Debug("Cleanup completed, exiting")
+
+		ctx.exitFunc(130)
+		return 1
+	})
+
+	// Set up signal handler for Ctrl+C
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		ctx.log.Debug("Received signal", slog.Any("signal", sig))
+		ctx.log.Info("Interrupt signal received, starting cleanup")
+
+		ctx.vtproClient.ForceCleanup(ctx.simplHwnd, ctx.simplPid)
+
+		ctx.log.Debug("Cleanup completed, exiting")
+		ctx.exitFunc(130)
+	}()
+}
+
+// waitForWindowReady waits for VTPro window to appear and become responsive
+func waitForWindowReady(vtproClient *vtpro.Client, pid uint32, log logger.LoggerInterface) (uintptr, error) {
+	log.Info("Waiting for VTPro to fully launch...")
+
+	hwnd, found := vtproClient.WaitForAppear(pid, timeouts.WindowAppearTimeout)
+	if !found {
+		log.Error("Timeout waiting for window to appear after 3 minutes")
+		log.Info("Forcing VTPro to terminate due to timeout")
+		vtproClient.ForceCleanup(0, pid)
+		return 0, fmt.Errorf("timed out waiting for VTPro window to appear after 3 minutes")
+	}
+
+	log.Debug("Window appeared", slog.Uint64("hwnd", uint64(hwnd)))
+
+	// Wait for the window to be fully ready and responsive
+	if !vtproClient.WaitForReady(hwnd, timeouts.WindowReadyTimeout) {
+		log.Error("Window not responding properly")
+		return 0, fmt.Errorf("window appeared but is not responding properly")
+	}
+
+	// Small extra delay to allow UI to finish settling
+	log.Info("Waiting a few extra seconds for UI to settle...")
+	time.Sleep(timeouts.UISettlingDelay)
+
+	return hwnd, nil
+}
+
+// runCompilation creates a compiler and executes the compilation
+func runCompilation(params CompilationParams) (*compiler.CompileResult, error) {
+	comp := compiler.NewCompiler(params.Logger)
+
+	result, err := comp.Compile(compiler.CompileOptions{
+		FilePath:     params.FilePath,
+		RecompileAll: params.Config.RecompileAll,
+		Hwnd:         params.Hwnd,
+		SimplPid:     params.Pid,
+		SimplPidPtr:  params.PidPtr,
+	})
+	if err != nil {
+		params.Logger.Error("Compilation failed", slog.Any("error", err))
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// displayCompilationResults shows the compilation summary to the user
+func displayCompilationResults(result *compiler.CompileResult, log logger.LoggerInterface) {
+	log.Info("Compilation complete",
+		slog.Int("errors", result.Errors),
+		slog.Int("warnings", result.Warnings),
+		slog.Int("notices", result.Notices),
+		slog.String("compileTime", fmt.Sprintf("%.2fs", result.CompileTime)),
+	)
+}
+
+// Execute runs the provided command with the given arguments.
+func Execute(cmd *cobra.Command, args []string) error {
+	cfg := NewConfigFromFlags(cmd)
+
+	if err := handleLogsFlag(cfg, os.Exit); err != nil {
+		return err
+	}
+
+	if len(args) == 0 {
+		return fmt.Errorf("file path required")
+	}
+
+	log, err := initializeLogger(cfg)
+	if err != nil {
+		return err
+	}
+
+	defer log.Close()
+
+	log.Debug("Starting vtpc", slog.Any("args", args))
+	log.Debug("Flags set",
+		slog.Bool("verbose", cfg.Verbose),
+		slog.Bool("recompileAll", cfg.RecompileAll),
+	)
+
+	// Recover from panics and log them
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("PANIC RECOVERED",
+				slog.Any("panic", r),
+				slog.String("stack", string(debug.Stack())),
+			)
+
+			fmt.Fprintf(os.Stderr, "\n*** PANIC: %v ***\n", r)
+			fmt.Fprintf(os.Stderr, "Check log file for details\n")
+		}
+	}()
+
+	// Validate VTPro installation before checking elevation
+	if err := vtpro.ValidateVTProInstallation(); err != nil {
+		log.Error("VTPro installation check failed", slog.Any("error", err))
+		return err
+	}
+
+	log.Debug("VTPro installation validated", slog.String("path", vtpro.GetVTProPath()))
+
+	// Validate file path before requesting elevation
+	absPath, err := validateAndResolvePath(args[0], log)
+	if err != nil {
+		return err
+	}
+
+	if err := ensureElevated(log); err != nil {
+		return err
+	}
+
+	vtproClient := vtpro.NewClient(log)
+	_, pid, cleanup, err := launchVTPro(vtproClient, absPath, log)
+	if err != nil {
+		return err
+	}
+
+	defer cleanup()
+
+	// Create execution context to hold state for signal handlers
+	ctx := &ExecutionContext{
+		simplPid:    pid,
+		log:         log,
+		vtproClient: vtproClient,
+		exitFunc:    os.Exit,
+	}
+
+	setupSignalHandlers(ctx)
+
+	hwnd, err := waitForWindowReady(vtproClient, pid, log)
+	if err != nil {
+		return err
+	}
+
+	// Store hwnd in context for signal handlers and cleanup
+	ctx.simplHwnd = hwnd
+	log.Debug("Stored hwnd in execution context", slog.Uint64("hwnd", uint64(hwnd)))
+
+	defer vtproClient.Cleanup(hwnd, pid)
+
+	result, err := runCompilation(CompilationParams{
+		FilePath: absPath,
+		Hwnd:     hwnd,
+		Pid:      pid,
+		PidPtr:   &ctx.simplPid,
+		Config:   cfg,
+		Logger:   log,
+	})
+	if err != nil {
+		return err
+	}
+
+	displayCompilationResults(result, log)
+
+	if result.HasErrors {
+		log.Error("Compilation failed with errors")
+		return fmt.Errorf("compilation failed with %d error(s)", result.Errors)
+	}
+
+	return nil
+}
