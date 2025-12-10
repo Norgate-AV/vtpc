@@ -16,13 +16,10 @@ import (
 )
 
 const (
-	// Message type constants for parsing detailed messages
-	// msgTypeError   = "ERROR"
-	// msgTypeWarning = "WARNING"
-
 	// Dialog title constants
 	dialogCompiling    = "VisionTools Pro-e Compiling..."
 	dialogVTProWarning = "VisionTools(R) Pro-e"
+	// dialogAddressBook  = "Address Book"
 )
 
 // CompileResult holds the results of a compilation
@@ -32,6 +29,8 @@ type CompileResult struct {
 	ErrorMessages   []string
 	WarningMessages []string
 	HasErrors       bool
+	Size            string // Output file size (e.g., "18,588,092 bytes")
+	ProjectSize     string // Project size (e.g., "0 Kb")
 }
 
 // CompileOptions holds options for the compilation
@@ -251,7 +250,8 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 			)
 
 			// Handle each dialog type as it appears
-			if ev.Title == dialogCompiling {
+			switch ev.Title {
+			case dialogCompiling:
 				// Compilation in progress
 				if !compilingDetected {
 					c.log.Debug("Detected 'VisionTools Pro-e Compiling...' dialog")
@@ -259,6 +259,14 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 					compilingDetected = true
 					compilingDialogHwnd = ev.Hwnd
 				}
+
+				// case dialogAddressBook:
+				// 	// Address Book dialog can appear during compilation (triggered by F12)
+				// 	// Close it immediately so it doesn't block compilation
+				// 	c.log.Debug("Detected 'Address Book' dialog during compilation - closing")
+				// 	c.log.Info("Closing Address Book dialog")
+				// 	c.windowMgr.CloseWindow(ev.Hwnd, dialogAddressBook)
+				// 	time.Sleep(timeouts.WindowMessageDelay)
 			}
 
 		case <-ticker.C:
@@ -276,6 +284,11 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 					logText := c.readMessageLog(opts.Hwnd)
 					if logText != "" {
 						c.parseVTProOutput(logText, result)
+
+						// Log any warning/error messages
+						if len(result.ErrorMessages) > 0 || len(result.WarningMessages) > 0 {
+							c.logCompilationMessages(result.ErrorMessages, result.WarningMessages)
+						}
 					} else {
 						c.log.Warn("Could not read Message Log contents")
 					}
@@ -306,82 +319,37 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 	}
 }
 
-// parseDetailedMessages extracts error/warning/notice messages from Program Compilation dialog
-// func (c *Compiler) parseDetailedMessages(hwnd uintptr) (warnings, errors []string) {
-// 	childInfos := c.windowMgr.CollectChildInfos(hwnd)
-
-// 	var lastType string // Track the type of the last message: "ERROR", "WARNING", or "NOTICE"
-
-// 	// Extract messages from ListBox
-// 	for _, ci := range childInfos {
-// 		if ci.ClassName != "ListBox" || len(ci.Items) == 0 {
-// 			continue
-// 		}
-
-// 		for _, line := range ci.Items {
-// 			line = strings.TrimSpace(line)
-// 			if line == "" {
-// 				continue
-// 			}
-
-// 			lineUpper := strings.ToUpper(line)
-// 			switch {
-// 			case strings.HasPrefix(lineUpper, "ERROR\t") || strings.HasPrefix(lineUpper, "ERROR "):
-// 				errors = append(errors, line)
-// 				lastType = msgTypeError
-// 			case strings.HasPrefix(lineUpper, "WARNING\t") || strings.HasPrefix(lineUpper, "WARNING "):
-// 				warnings = append(warnings, line)
-// 				lastType = msgTypeWarning
-// 			default:
-// 				// Continuation of previous message - append to the last type that was seen
-// 				switch lastType {
-// 				case msgTypeError:
-// 					if len(errors) > 0 {
-// 						errors[len(errors)-1] += " " + line
-// 					}
-// 				case msgTypeWarning:
-// 					if len(warnings) > 0 {
-// 						warnings[len(warnings)-1] += " " + line
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-
-// 	return warnings, errors
-// }
-
 // logCompilationMessages logs error/warning/notice messages with proper formatting
-// func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs []string) {
-// 	if len(errorMsgs) > 0 {
-// 		c.log.Info("")
-// 		c.log.Info("Error messages:")
-// 		for i, msg := range errorMsgs {
-// 			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
-// 				slog.Int("number", i+1),
-// 				slog.String("type", "error"),
-// 				slog.String("message", msg),
-// 			)
-// 		}
-// 	}
+func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs []string) {
+	if len(errorMsgs) > 0 {
+		c.log.Info("")
+		c.log.Info("Error messages:")
+		for i, msg := range errorMsgs {
+			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
+				slog.Int("number", i+1),
+				slog.String("type", "error"),
+				slog.String("message", msg),
+			)
+		}
+	}
 
-// 	if len(warningMsgs) > 0 {
-// 		c.log.Info("")
-// 		c.log.Info("Warning messages:")
-// 		for i, msg := range warningMsgs {
-// 			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
-// 				slog.Int("number", i+1),
-// 				slog.String("type", "warning"),
-// 				slog.String("message", msg),
-// 			)
-// 		}
-// 	}
+	if len(warningMsgs) > 0 {
+		c.log.Info("")
+		c.log.Info("Warning messages:")
+		for i, msg := range warningMsgs {
+			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
+				slog.Int("number", i+1),
+				slog.String("type", "warning"),
+				slog.String("message", msg),
+			)
+		}
+	}
 
-// 	// Add trailing blank line if any messages were displayed
-// 	if len(errorMsgs) > 0 || len(warningMsgs) > 0 {
-// 		c.log.Info("")
-// 	}
-// }
+	// Add trailing blank line if any messages were displayed
+	if len(errorMsgs) > 0 || len(warningMsgs) > 0 {
+		c.log.Info("")
+	}
+}
 
 // handlePreCompilationDialogs checks for and dismisses dialogs that may block compilation
 // This includes "Operation Complete" dialog that can appear during VTPro startup
@@ -420,7 +388,7 @@ func (c *Compiler) handlePreCompilationDialogs() error {
 	}
 }
 
-// handlePostCompilationEvents waits for and handles any post-compilation dialogs (like Confirmation)
+// handlePostCompilationEvents waits for and handles any post-compilation dialogs (like Address Book)
 func (c *Compiler) handlePostCompilationEvents() error {
 	// Short timeout - if no confirmation dialog appears, that's fine
 	timeout := time.NewTimer(timeouts.DialogConfirmationTimeout)
@@ -432,17 +400,12 @@ func (c *Compiler) handlePostCompilationEvents() error {
 			slog.String("title", ev.Title),
 			slog.Uint64("hwnd", uint64(ev.Hwnd)))
 
-		// Only handle Confirmation dialog here
-		// if ev.Title == dialogConfirmation {
-		// 	c.log.Debug("Detected 'Confirmation' dialog - clicking No")
-		// 	c.log.Info("Handling confirmation dialog")
-
-		// 	if c.controlReader.FindAndClickButton(ev.Hwnd, "&No") {
-		// 		c.log.Debug("Successfully clicked 'No' button")
-		// 		time.Sleep(timeouts.WindowMessageDelay)
-		// 	} else {
-		// 		time.Sleep(timeouts.WindowMessageDelay)
-		// 	}
+		// Handle Address Book dialog if it appears
+		// if ev.Title == dialogAddressBook {
+		// 	c.log.Debug("Detected 'Address Book' dialog - closing")
+		// 	c.log.Info("Handling Address Book dialog")
+		// 	c.windowMgr.CloseWindow(ev.Hwnd, dialogAddressBook)
+		// 	time.Sleep(timeouts.WindowMessageDelay)
 		// }
 
 	case <-timeout.C:
@@ -534,9 +497,14 @@ func (c *Compiler) readMessageLog(mainHwnd uintptr) string {
 // ---------- Compiling for TSW-770: [...] ---------
 // Boot
 // ~DummyFlashPage - [ not compiled ]
+// somepage
+//
+//	[ warning ]: Object "..." on Page "..." has an unassigned Smart Object ID.
+//	[ error ]: Some error message
+//
 // ...
 // ---------- Successful ---------
-// 0 warning(s), 0 error(s)
+// 1 warning(s), 0 error(s)
 func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 	c.log.Debug("Parsing VTPro output", slog.Int("textLength", len(text)))
 
@@ -546,6 +514,52 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
+		}
+
+		// Look for warning messages: [ warning ]: ...
+		if strings.Contains(line, "[ warning ]") {
+			// Extract the warning message after "[ warning ]:"
+			if idx := strings.Index(line, "[ warning ]:"); idx != -1 {
+				msg := strings.TrimSpace(line[idx+len("[ warning ]:"):])
+				if msg != "" {
+					result.WarningMessages = append(result.WarningMessages, msg)
+					c.log.Debug("Found warning message", slog.String("message", msg))
+				}
+			}
+		}
+
+		// Look for error messages: [ error ]: ...
+		if strings.Contains(line, "[ error ]") {
+			// Extract the error message after "[ error ]:"
+			if idx := strings.Index(line, "[ error ]:"); idx != -1 {
+				msg := strings.TrimSpace(line[idx+len("[ error ]:"):])
+				if msg != "" {
+					result.ErrorMessages = append(result.ErrorMessages, msg)
+					c.log.Debug("Found error message", slog.String("message", msg))
+				}
+			}
+		}
+
+		// Look for size: [ size ]: 18,588,092 bytes
+		if strings.Contains(line, "[ size ]") {
+			if idx := strings.Index(line, "[ size ]:"); idx != -1 {
+				size := strings.TrimSpace(line[idx+len("[ size ]:"):])
+				if size != "" {
+					result.Size = size
+					c.log.Debug("Found size", slog.String("size", size))
+				}
+			}
+		}
+
+		// Look for project size: [ project size ]: 0 Kb
+		if strings.Contains(line, "[ project size ]") {
+			if idx := strings.Index(line, "[ project size ]:"); idx != -1 {
+				projectSize := strings.TrimSpace(line[idx+len("[ project size ]:"):])
+				if projectSize != "" {
+					result.ProjectSize = projectSize
+					c.log.Debug("Found project size", slog.String("projectSize", projectSize))
+				}
+			}
 		}
 
 		// Look for the summary line: "0 warning(s), 0 error(s)"
@@ -574,5 +588,7 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 	c.log.Debug("Parse complete",
 		slog.Int("warnings", result.Warnings),
 		slog.Int("errors", result.Errors),
+		slog.String("size", result.Size),
+		slog.String("projectSize", result.ProjectSize),
 	)
 }

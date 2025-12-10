@@ -83,6 +83,9 @@ jobs:
           fetch-depth: 0
           lfs: true
 
+      # Workaround: actions/checkout has a bug where lfs: true doesn't work correctly
+      # with workflow_dispatch/workflow_call triggers. Explicit git lfs pull is required.
+      # See: https://github.com/actions/checkout/issues (long-running issue)
       - name: Pull LFS files
         run: git lfs pull
 

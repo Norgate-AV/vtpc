@@ -47,13 +47,11 @@ func TestIntegration_SimpleCompile(t *testing.T) {
 
 // TestIntegration_CompileWithWarnings tests compilation of a file that produces warnings
 func TestIntegration_CompileWithWarnings(t *testing.T) {
-	t.Skip()
-
 	if !windows.IsElevated() {
 		t.Skip("Integration tests require administrator privileges")
 	}
 
-	fixturePath := getFixturePath(t, "warnings.vtp")
+	fixturePath := getFixturePath(t, "warning.vtp")
 	require.FileExists(t, fixturePath, "Fixture file should exist")
 
 	result, cleanup := compileFile(t, fixturePath)

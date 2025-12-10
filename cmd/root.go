@@ -269,6 +269,8 @@ func displayCompilationResults(result *compiler.CompileResult, log logger.Logger
 	log.Info("Compilation complete",
 		slog.Int("errors", result.Errors),
 		slog.Int("warnings", result.Warnings),
+		slog.String("size", result.Size),
+		slog.String("projectSize", result.ProjectSize),
 	)
 }
 

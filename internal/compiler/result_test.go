@@ -78,13 +78,13 @@ func TestCompileResult_CountsMatchMessages(t *testing.T) {
 		Errors:   2,
 		Warnings: 3,
 		ErrorMessages: []string{
-			"ERROR: Undefined variable X",
-			"ERROR: Missing semicolon",
+			"Object \"Button1\" on Page \"MainPage\" has invalid join number.",
+			"Missing Smart Object reference in control definition.",
 		},
 		WarningMessages: []string{
-			"WARNING: Unused variable Y",
-			"WARNING: Deprecated function",
-			"WARNING: Unreachable code",
+			"Object \"Video Switcher\" on Page \"Settings\" has an unassigned Smart Object ID.",
+			"The controls listed are close to exceeding the windows path limitations.",
+			"Control generating CED file has a name that is too long.",
 		},
 		HasErrors: true,
 	}
@@ -103,7 +103,7 @@ func TestCompileOptions_RequiredFields(t *testing.T) {
 	assert.Equal(t, uintptr(12345), opts.Hwnd)
 }
 
-func TestCompileOptions_SimplPidPtr(t *testing.T) {
+func TestCompileOptions_VTProPidPtr(t *testing.T) {
 	var pid uint32
 	opts := compiler.CompileOptions{
 		VTProPidPtr: &pid,
