@@ -165,7 +165,7 @@ func launchVTPro(vtproClient *vtpro.Client, absPath string, log logger.LoggerInt
 	// Open the file with VTPro application using elevated privileges
 	// SW_SHOWNORMAL = 1
 	log.Debug("Launching VTPro with file", slog.String("path", absPath))
-	pid, err = windows.CreateProcessSimple(vtpro.GetVTProPath(), fmt.Sprintf("\"%s\"", absPath), 1, log)
+	pid, err = windows.CreateProcessSimple(vtpro.GetVTProPath(), fmt.Sprintf("%q", absPath), 1, log)
 	if err != nil {
 		log.Error("CreateProcessSimple failed", slog.Any("error", err))
 		return 0, 0, nil, fmt.Errorf("error opening file: %w", err)

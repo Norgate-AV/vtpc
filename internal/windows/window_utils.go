@@ -142,9 +142,9 @@ func CreateProcessSimple(exePath, args string, showCmd int, log logger.LoggerInt
 	// Windows CreateProcess requires the full command line including the executable
 	var cmdLine string
 	if args != "" {
-		cmdLine = fmt.Sprintf("\"%s\" %s", exePath, args)
+		cmdLine = fmt.Sprintf("%q %s", exePath, args)
 	} else {
-		cmdLine = fmt.Sprintf("\"%s\"", exePath)
+		cmdLine = fmt.Sprintf("%q", exePath)
 	}
 
 	cmdLinePtr, err := syscall.UTF16PtrFromString(cmdLine)
