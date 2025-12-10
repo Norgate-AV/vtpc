@@ -5,6 +5,7 @@ package windows
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"syscall"
 	"unsafe"
 
@@ -138,6 +139,13 @@ func ShellExecuteEx(hwnd uintptr, verb, file, args, cwd string, showCmd int, log
 // This provides direct control over the command line, unlike ShellExecuteEx which
 // may modify arguments based on shell integration and file associations.
 func CreateProcessSimple(exePath, args string, showCmd int, log logger.LoggerInterface) (uint32, error) {
+	// Validate that the executable exists before attempting to launch
+	if _, err := os.Stat(exePath); os.IsNotExist(err) {
+		return 0, fmt.Errorf("executable not found: %s", exePath)
+	} else if err != nil {
+		return 0, fmt.Errorf("error checking executable at %s: %w", exePath, err)
+	}
+
 	// Build the command line: "executable" "arguments"
 	// Windows CreateProcess requires the full command line including the executable
 	var cmdLine string

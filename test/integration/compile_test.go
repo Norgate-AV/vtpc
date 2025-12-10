@@ -150,6 +150,10 @@ func compileFile(t *testing.T, filePath string) (*compiler.CompileResult, func()
 	require.NoError(t, err, "Should create logger")
 	defer testLog.Close()
 
+	// Validate VTPro installation before attempting to launch
+	err = vtpro.ValidateVTProInstallation()
+	require.NoError(t, err, "VTPro should be installed")
+
 	// Create SIMPL client
 	vtproClient := vtpro.NewClient(testLog)
 
