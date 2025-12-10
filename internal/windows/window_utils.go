@@ -62,78 +62,78 @@ func ShellExecute(hwnd uintptr, verb, file, args, cwd string, showCmd int) error
 
 // ShellExecuteEx executes a file using the Windows shell and returns the process ID
 // This is more reliable than ShellExecute when you need to track the launched process
-func ShellExecuteEx(hwnd uintptr, verb, file, args, cwd string, showCmd int, log logger.LoggerInterface) (uint32, error) {
-	const SEE_MASK_NOCLOSEPROCESS = 0x00000040
+// func ShellExecuteEx(hwnd uintptr, verb, file, args, cwd string, showCmd int, log logger.LoggerInterface) (uint32, error) {
+// 	const SEE_MASK_NOCLOSEPROCESS = 0x00000040
 
-	var verbPtr, filePtr, argsPtr, cwdPtr *uint16
-	var err error
+// 	var verbPtr, filePtr, argsPtr, cwdPtr *uint16
+// 	var err error
 
-	if verb != "" {
-		verbPtr, err = syscall.UTF16PtrFromString(verb)
-		if err != nil {
-			return 0, err
-		}
-	}
+// 	if verb != "" {
+// 		verbPtr, err = syscall.UTF16PtrFromString(verb)
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 	}
 
-	filePtr, err = syscall.UTF16PtrFromString(file)
-	if err != nil {
-		return 0, err
-	}
+// 	filePtr, err = syscall.UTF16PtrFromString(file)
+// 	if err != nil {
+// 		return 0, err
+// 	}
 
-	if args != "" {
-		argsPtr, err = syscall.UTF16PtrFromString(args)
-		if err != nil {
-			return 0, err
-		}
-	}
+// 	if args != "" {
+// 		argsPtr, err = syscall.UTF16PtrFromString(args)
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 	}
 
-	if cwd != "" {
-		cwdPtr, err = syscall.UTF16PtrFromString(cwd)
-		if err != nil {
-			return 0, err
-		}
-	}
+// 	if cwd != "" {
+// 		cwdPtr, err = syscall.UTF16PtrFromString(cwd)
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 	}
 
-	// Initialize SHELLEXECUTEINFO structure
-	sei := SHELLEXECUTEINFO{
-		CbSize:       uint32(unsafe.Sizeof(SHELLEXECUTEINFO{})),
-		FMask:        SEE_MASK_NOCLOSEPROCESS,
-		Hwnd:         hwnd,
-		LpVerb:       verbPtr,
-		LpFile:       filePtr,
-		LpParameters: argsPtr,
-		LpDirectory:  cwdPtr,
-		NShow:        int32(showCmd),
-	}
+// 	// Initialize SHELLEXECUTEINFO structure
+// 	sei := SHELLEXECUTEINFO{
+// 		CbSize:       uint32(unsafe.Sizeof(SHELLEXECUTEINFO{})),
+// 		FMask:        SEE_MASK_NOCLOSEPROCESS,
+// 		Hwnd:         hwnd,
+// 		LpVerb:       verbPtr,
+// 		LpFile:       filePtr,
+// 		LpParameters: argsPtr,
+// 		LpDirectory:  cwdPtr,
+// 		NShow:        int32(showCmd),
+// 	}
 
-	// Call ShellExecuteExW
-	ret, _, _ := procShellExecuteEx.Call(uintptr(unsafe.Pointer(&sei)))
-	if ret == 0 {
-		return 0, fmt.Errorf("shell execute ex failed")
-	}
+// 	// Call ShellExecuteExW
+// 	ret, _, _ := procShellExecuteEx.Call(uintptr(unsafe.Pointer(&sei)))
+// 	if ret == 0 {
+// 		return 0, fmt.Errorf("shell execute ex failed")
+// 	}
 
-	// Get process ID from the process handle
-	if sei.HProcess == 0 {
-		return 0, fmt.Errorf("shell execute ex did not return a process handle")
-	}
+// 	// Get process ID from the process handle
+// 	if sei.HProcess == 0 {
+// 		return 0, fmt.Errorf("shell execute ex did not return a process handle")
+// 	}
 
-	pid, _, _ := procGetProcessId.Call(sei.HProcess)
-	if pid == 0 {
-		// Clean up the process handle before returning error
-		if ret, _, err := ProcCloseHandle.Call(sei.HProcess); ret == 0 {
-			log.Debug("Failed to close process handle in error path", slog.Any("error", err))
-		}
+// 	pid, _, _ := procGetProcessId.Call(sei.HProcess)
+// 	if pid == 0 {
+// 		// Clean up the process handle before returning error
+// 		if ret, _, err := ProcCloseHandle.Call(sei.HProcess); ret == 0 {
+// 			log.Debug("Failed to close process handle in error path", slog.Any("error", err))
+// 		}
 
-		return 0, fmt.Errorf("failed to get process ID from handle")
-	}
+// 		return 0, fmt.Errorf("failed to get process ID from handle")
+// 	}
 
-	// Close the process handle - we only need the PID
-	if ret, _, err := ProcCloseHandle.Call(sei.HProcess); ret == 0 {
-		log.Debug("Failed to close process handle after getting PID", slog.Any("error", err))
-	}
+// 	// Close the process handle - we only need the PID
+// 	if ret, _, err := ProcCloseHandle.Call(sei.HProcess); ret == 0 {
+// 		log.Debug("Failed to close process handle after getting PID", slog.Any("error", err))
+// 	}
 
-	return uint32(pid), nil
-}
+// 	return uint32(pid), nil
+// }
 
 // CreateProcessSimple launches an executable with arguments and returns the process ID
 // This provides direct control over the command line, unlike ShellExecuteEx which
