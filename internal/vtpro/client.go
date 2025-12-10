@@ -75,30 +75,36 @@ func (c *Client) findWindowWithTracking(targetPid uint32, debug bool, seenWindow
 				}
 			}
 
-			// Skip splash screens and loading dialogs
+			// Get window class name and lowercase title for identification
+			className := windows.GetClassName(w.Hwnd)
 			title := strings.ToLower(w.Title)
 
-			// If window title contains .vtp, it's definitely the main window with file loaded
+			// Priority 1: Window with .vtp in title - file is definitely loaded
 			if strings.Contains(w.Title, ".vtp") {
 				mainWindow = w
 				break
 			}
 
-			// Generic "VTPro" is likely the splash screen - remember it but keep looking
+			// Priority 2: VWT32AppClass - this is the main application window
+			if className == "VWT32AppClass" {
+				mainWindow = w
+				break
+			}
+
+			// Skip progress dialogs
+			if strings.Contains(title, "progress") {
+				continue
+			}
+
+			// Skip splash screen - remember it but keep looking
 			if w.Title == "VTPro" {
 				splashWindow = w
 				continue
 			}
 
-			// Look for other SIMPL-related windows that aren't splash/about
-			if !strings.Contains(title, "splash") &&
-				!strings.Contains(title, "loading") &&
-				!strings.Contains(title, "about") &&
-				len(w.Title) > 5 {
-				if strings.Contains(title, "vtpro") {
-					mainWindow = w
-					break
-				}
+			// Skip common dialog window class (#32770)
+			if className == "#32770" {
+				continue
 			}
 		}
 	}
