@@ -146,8 +146,8 @@ func compileFile(t *testing.T, filePath string) (*compiler.CompileResult, func()
 	absPath, err := filepath.Abs(filePath)
 	require.NoError(t, err, "Should resolve absolute path")
 
-	// Create a minimal logger for the test (discard output)
-	testLog, err := logger.NewLogger(logger.LoggerOptions{Verbose: false})
+	// Create a verbose logger for the test to see what's happening
+	testLog, err := logger.NewLogger(logger.LoggerOptions{Verbose: true})
 	require.NoError(t, err, "Should create logger")
 	defer testLog.Close()
 
