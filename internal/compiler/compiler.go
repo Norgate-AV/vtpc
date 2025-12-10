@@ -1,3 +1,4 @@
+// Package compiler provides VTPro file compilation orchestration and result parsing.
 package compiler
 
 import (
@@ -16,8 +17,8 @@ import (
 
 const (
 	// Message type constants for parsing detailed messages
-	msgTypeError   = "ERROR"
-	msgTypeWarning = "WARNING"
+	// msgTypeError   = "ERROR"
+	// msgTypeWarning = "WARNING"
 
 	// Dialog title constants
 	dialogCompiling    = "VisionTools Pro-e Compiling..."
@@ -250,8 +251,7 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 			)
 
 			// Handle each dialog type as it appears
-			switch ev.Title {
-			case dialogCompiling:
+			if ev.Title == dialogCompiling {
 				// Compilation in progress
 				if !compilingDetected {
 					c.log.Debug("Detected 'VisionTools Pro-e Compiling...' dialog")
@@ -307,81 +307,81 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 }
 
 // parseDetailedMessages extracts error/warning/notice messages from Program Compilation dialog
-func (c *Compiler) parseDetailedMessages(hwnd uintptr) (warnings, errors []string) {
-	childInfos := c.windowMgr.CollectChildInfos(hwnd)
+// func (c *Compiler) parseDetailedMessages(hwnd uintptr) (warnings, errors []string) {
+// 	childInfos := c.windowMgr.CollectChildInfos(hwnd)
 
-	var lastType string // Track the type of the last message: "ERROR", "WARNING", or "NOTICE"
+// 	var lastType string // Track the type of the last message: "ERROR", "WARNING", or "NOTICE"
 
-	// Extract messages from ListBox
-	for _, ci := range childInfos {
-		if ci.ClassName != "ListBox" || len(ci.Items) == 0 {
-			continue
-		}
+// 	// Extract messages from ListBox
+// 	for _, ci := range childInfos {
+// 		if ci.ClassName != "ListBox" || len(ci.Items) == 0 {
+// 			continue
+// 		}
 
-		for _, line := range ci.Items {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
+// 		for _, line := range ci.Items {
+// 			line = strings.TrimSpace(line)
+// 			if line == "" {
+// 				continue
+// 			}
 
-			lineUpper := strings.ToUpper(line)
-			switch {
-			case strings.HasPrefix(lineUpper, "ERROR\t") || strings.HasPrefix(lineUpper, "ERROR "):
-				errors = append(errors, line)
-				lastType = msgTypeError
-			case strings.HasPrefix(lineUpper, "WARNING\t") || strings.HasPrefix(lineUpper, "WARNING "):
-				warnings = append(warnings, line)
-				lastType = msgTypeWarning
-			default:
-				// Continuation of previous message - append to the last type that was seen
-				switch lastType {
-				case msgTypeError:
-					if len(errors) > 0 {
-						errors[len(errors)-1] += " " + line
-					}
-				case msgTypeWarning:
-					if len(warnings) > 0 {
-						warnings[len(warnings)-1] += " " + line
-					}
-				}
-			}
-		}
-	}
+// 			lineUpper := strings.ToUpper(line)
+// 			switch {
+// 			case strings.HasPrefix(lineUpper, "ERROR\t") || strings.HasPrefix(lineUpper, "ERROR "):
+// 				errors = append(errors, line)
+// 				lastType = msgTypeError
+// 			case strings.HasPrefix(lineUpper, "WARNING\t") || strings.HasPrefix(lineUpper, "WARNING "):
+// 				warnings = append(warnings, line)
+// 				lastType = msgTypeWarning
+// 			default:
+// 				// Continuation of previous message - append to the last type that was seen
+// 				switch lastType {
+// 				case msgTypeError:
+// 					if len(errors) > 0 {
+// 						errors[len(errors)-1] += " " + line
+// 					}
+// 				case msgTypeWarning:
+// 					if len(warnings) > 0 {
+// 						warnings[len(warnings)-1] += " " + line
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
 
-	return warnings, errors
-}
+// 	return warnings, errors
+// }
 
 // logCompilationMessages logs error/warning/notice messages with proper formatting
-func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs []string) {
-	if len(errorMsgs) > 0 {
-		c.log.Info("")
-		c.log.Info("Error messages:")
-		for i, msg := range errorMsgs {
-			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
-				slog.Int("number", i+1),
-				slog.String("type", "error"),
-				slog.String("message", msg),
-			)
-		}
-	}
+// func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs []string) {
+// 	if len(errorMsgs) > 0 {
+// 		c.log.Info("")
+// 		c.log.Info("Error messages:")
+// 		for i, msg := range errorMsgs {
+// 			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
+// 				slog.Int("number", i+1),
+// 				slog.String("type", "error"),
+// 				slog.String("message", msg),
+// 			)
+// 		}
+// 	}
 
-	if len(warningMsgs) > 0 {
-		c.log.Info("")
-		c.log.Info("Warning messages:")
-		for i, msg := range warningMsgs {
-			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
-				slog.Int("number", i+1),
-				slog.String("type", "warning"),
-				slog.String("message", msg),
-			)
-		}
-	}
+// 	if len(warningMsgs) > 0 {
+// 		c.log.Info("")
+// 		c.log.Info("Warning messages:")
+// 		for i, msg := range warningMsgs {
+// 			c.log.Info(fmt.Sprintf("  %d. %s", i+1, msg),
+// 				slog.Int("number", i+1),
+// 				slog.String("type", "warning"),
+// 				slog.String("message", msg),
+// 			)
+// 		}
+// 	}
 
-	// Add trailing blank line if any messages were displayed
-	if len(errorMsgs) > 0 || len(warningMsgs) > 0 {
-		c.log.Info("")
-	}
-}
+// 	// Add trailing blank line if any messages were displayed
+// 	if len(errorMsgs) > 0 || len(warningMsgs) > 0 {
+// 		c.log.Info("")
+// 	}
+// }
 
 // handlePreCompilationDialogs checks for and dismisses dialogs that may block compilation
 // This includes "Operation Complete" dialog that can appear during VTPro startup
