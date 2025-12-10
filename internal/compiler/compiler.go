@@ -19,7 +19,7 @@ const (
 	// Dialog title constants
 	dialogCompiling    = "VisionTools Pro-e Compiling..."
 	dialogVTProWarning = "VisionTools(R) Pro-e"
-	// dialogAddressBook  = "Address Book"
+	dialogAddressBook  = "Address Book"
 )
 
 // CompileResult holds the results of a compilation
@@ -250,8 +250,7 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 			)
 
 			// Handle each dialog type as it appears
-			switch ev.Title {
-			case dialogCompiling:
+			if ev.Title == dialogCompiling {
 				// Compilation in progress
 				if !compilingDetected {
 					c.log.Debug("Detected 'VisionTools Pro-e Compiling...' dialog")
@@ -259,14 +258,6 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 					compilingDetected = true
 					compilingDialogHwnd = ev.Hwnd
 				}
-
-				// case dialogAddressBook:
-				// 	// Address Book dialog can appear during compilation (triggered by F12)
-				// 	// Close it immediately so it doesn't block compilation
-				// 	c.log.Debug("Detected 'Address Book' dialog during compilation - closing")
-				// 	c.log.Info("Closing Address Book dialog")
-				// 	c.windowMgr.CloseWindow(ev.Hwnd, dialogAddressBook)
-				// 	time.Sleep(timeouts.WindowMessageDelay)
 			}
 
 		case <-ticker.C:
@@ -374,7 +365,6 @@ func (c *Compiler) handlePreCompilationDialogs() error {
 				c.log.Debug("Detected VTPro warning dialog - closing")
 				c.log.Info("Handling pre-compilation warning dialog")
 				c.windowMgr.CloseWindow(ev.Hwnd, dialogVTProWarning)
-				time.Sleep(timeouts.WindowMessageDelay)
 
 			default:
 				// Log but don't handle other dialogs here
@@ -401,12 +391,11 @@ func (c *Compiler) handlePostCompilationEvents() error {
 			slog.Uint64("hwnd", uint64(ev.Hwnd)))
 
 		// Handle Address Book dialog if it appears
-		// if ev.Title == dialogAddressBook {
-		// 	c.log.Debug("Detected 'Address Book' dialog - closing")
-		// 	c.log.Info("Handling Address Book dialog")
-		// 	c.windowMgr.CloseWindow(ev.Hwnd, dialogAddressBook)
-		// 	time.Sleep(timeouts.WindowMessageDelay)
-		// }
+		if ev.Title == dialogAddressBook {
+			c.log.Debug("Detected 'Address Book' dialog - closing")
+			c.log.Info("Handling Address Book dialog")
+			c.windowMgr.CloseWindow(ev.Hwnd, dialogAddressBook)
+		}
 
 	case <-timeout.C:
 		// Timeout is fine - dialog may not appear
