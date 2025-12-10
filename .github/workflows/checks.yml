@@ -83,6 +83,9 @@ jobs:
           fetch-depth: 0
           lfs: true
 
+      - name: Pull LFS files
+        run: git lfs pull
+
       - name: Show Environment
         run: |
           $PSVersionTable
