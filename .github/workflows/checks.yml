@@ -73,36 +73,36 @@ jobs:
           files: ./.coverage/coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  # integration:
-  #   name: Integration Tests
-  #   runs-on: [self-hosted, windows, server, ui]
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v6
-  #       with:
-  #         fetch-depth: 0
+  integration:
+    name: Integration Tests
+    runs-on: [self-hosted, windows, server, ui]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-  #     - name: Show Environment
-  #       run: |
-  #         $PSVersionTable
-  #         $pwd
-  #         Write-Host Path:
-  #         $env:PATH
-  #         Write-Host
-  #         Write-Host whoami:
-  #         whoami
-  #         Write-Host
-  #         Write-Host Environment Variables:
-  #         Get-ChildItem env:
+      - name: Show Environment
+        run: |
+          $PSVersionTable
+          $pwd
+          Write-Host Path:
+          $env:PATH
+          Write-Host
+          Write-Host whoami:
+          whoami
+          Write-Host
+          Write-Host Environment Variables:
+          Get-ChildItem env:
 
-  #     - name: Set up Go
-  #       uses: actions/setup-go@v6
-  #       with:
-  #         go-version-file: go.mod
-  #         cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
 
-  #     - name: Install dependencies
-  #       run: go mod download
+      - name: Install dependencies
+        run: go mod download
 
-  #     - name: Run integration tests
-  #       run: go test -v -tags=integration ./test/integration
+      - name: Run integration tests
+        run: go test -v -tags=integration ./test/integration

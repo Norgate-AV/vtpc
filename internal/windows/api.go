@@ -116,7 +116,12 @@ func (w *WindowsAPI) IsWindowValid(hwnd uintptr) bool {
 }
 
 func (w *WindowsAPI) CollectChildInfos(hwnd uintptr) []ChildInfo {
-	return w.client.Window.CollectChildInfos(hwnd)
+	return CollectChildInfos(hwnd)
+}
+
+// GetWindowText retrieves the text of a window
+func (w *WindowsAPI) GetWindowText(hwnd uintptr) string {
+	return GetWindowText(hwnd)
 }
 
 func (w *WindowsAPI) WaitOnMonitor(timeout time.Duration, matchers ...func(WindowEvent) bool) (WindowEvent, bool) {

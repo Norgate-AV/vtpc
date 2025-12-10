@@ -397,6 +397,9 @@ func (c *Compiler) handlePreCompilationDialogs() error {
 				slog.String("title", ev.Title),
 				slog.Uint64("hwnd", uint64(ev.Hwnd)))
 
+			// Enumerate and log all child controls for this dialog
+			c.enumerateDialogControls(ev.Hwnd, ev.Title)
+
 			// Handle dialogs that may block compilation
 			switch ev.Title {
 			case dialogVTProWarning:
@@ -447,6 +450,54 @@ func (c *Compiler) handlePostCompilationEvents() error {
 	}
 
 	return nil
+}
+
+// enumerateDialogControls enumerates and logs all child controls in a dialog window
+func (c *Compiler) enumerateDialogControls(hwnd uintptr, title string) {
+	c.log.Trace("Enumerating dialog controls",
+		slog.String("title", title),
+		slog.Uint64("hwnd", uint64(hwnd)))
+
+	// Get the main window text (dialog body text, if any)
+	windowText := c.windowMgr.GetWindowText(hwnd)
+	if windowText != "" {
+		c.log.Trace("Dialog window text",
+			slog.String("title", title),
+			slog.String("text", windowText))
+	}
+
+	// Collect all child controls
+	childInfos := c.windowMgr.CollectChildInfos(hwnd)
+
+	if len(childInfos) == 0 {
+		c.log.Trace("No child controls found in dialog",
+			slog.String("title", title))
+		return
+	}
+
+	c.log.Trace("Found child controls in dialog",
+		slog.String("title", title),
+		slog.Int("count", len(childInfos)))
+
+	// Log details for each child control
+	for i, ci := range childInfos {
+		logAttrs := []any{
+			slog.String("title", title),
+			slog.Int("index", i),
+			slog.Uint64("childHwnd", uint64(ci.Hwnd)),
+			slog.String("className", ci.ClassName),
+		}
+
+		if ci.Text != "" {
+			logAttrs = append(logAttrs, slog.String("text", ci.Text))
+		}
+
+		if len(ci.Items) > 0 {
+			logAttrs = append(logAttrs, slog.Any("items", ci.Items))
+		}
+
+		c.log.Trace("Child control", logAttrs...)
+	}
 }
 
 // readMessageLog finds and reads the Message Log child window in VTPro

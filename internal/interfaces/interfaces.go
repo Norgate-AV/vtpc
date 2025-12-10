@@ -16,17 +16,15 @@ type WindowManager interface {
 	IsWindowValid(hwnd uintptr) bool
 	CollectChildInfos(hwnd uintptr) []windows.ChildInfo
 	WaitOnMonitor(timeout time.Duration, matchers ...func(windows.WindowEvent) bool) (windows.WindowEvent, bool)
+	GetWindowText(hwnd uintptr) string
 }
 
 // KeyboardInjector handles keyboard input
 type KeyboardInjector interface {
 	SendF12()
-	// SendAltF12()
 	SendEnter()
 	SendF12ToWindow(hwnd uintptr) bool
-	// SendAltF12ToWindow(hwnd uintptr) bool
 	SendF12WithSendInput() bool
-	// SendAltF12WithSendInput() bool
 }
 
 // ProcessManager handles SIMPL process operations
