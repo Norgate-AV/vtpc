@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -157,9 +158,9 @@ func compileFile(t *testing.T, filePath string) (*compiler.CompileResult, func()
 	// Create SIMPL client
 	vtproClient := vtpro.NewClient(testLog)
 
-	// Open file with VTPro
+	// Open file with VTPro using CreateProcessSimple (ShellExecuteEx doesn't work with VTPro)
 	t.Logf("Opening VTPro with file: %s", absPath)
-	pid, err := windows.ShellExecuteEx(0, "open", vtpro.GetVTProPath(), absPath, "", 1, testLog)
+	pid, err := windows.CreateProcessSimple(vtpro.GetVTProPath(), fmt.Sprintf("%q", absPath), 1, testLog)
 	require.NoError(t, err, "Should launch VTPro")
 	t.Logf("VTPro process started with PID: %d", pid)
 
