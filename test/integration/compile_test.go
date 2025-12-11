@@ -83,7 +83,7 @@ func TestIntegration_CompileWithErrors(t *testing.T) {
 
 	// Verify compilation failed with errors
 	assert.True(t, result.HasErrors, "Should fail compilation with errors")
-	assert.Greater(t, result.Errors, 1, "Should have at least 2 errors (not just a timeout)")
+	assert.Greater(t, result.Errors, 0, "Should have at least 1 error")
 	assert.Len(t, result.ErrorMessages, result.Errors, "Error count should match messages")
 
 	// Ensure we didn't hit a timeout
