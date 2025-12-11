@@ -71,8 +71,6 @@ func TestIntegration_CompileWithWarnings(t *testing.T) {
 
 // TestIntegration_CompileWithErrors tests compilation of a file that produces errors
 func TestIntegration_CompileWithErrors(t *testing.T) {
-	t.Skip()
-
 	if !windows.IsElevated() {
 		t.Skip("Integration tests require administrator privileges")
 	}
