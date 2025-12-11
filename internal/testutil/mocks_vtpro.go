@@ -1,3 +1,4 @@
+// Package testutil provides mock implementations for testing purposes.
 package testutil
 
 import "time"

@@ -174,8 +174,8 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 		// Use event-driven dialog handling
 		var err error
 		var eventResult *CompileResult
-		// compileCompleteHwnd, eventResult, err = c.handleCompilationEvents(opts)
-		_, eventResult, err = c.handleCompilationEvents(opts)
+
+		eventResult, err = c.handleCompilationEvents(opts)
 		if err != nil {
 			// Return the result even on error so caller can see what happened
 			return eventResult, err
@@ -187,14 +187,6 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 
 	// Close dialogs and handle post-compilation events
 	c.log.Debug("Closing dialogs and VTPro...")
-
-	// First, close the "Compile Complete" dialog if it's still open
-	// if compileCompleteHwnd != 0 {
-	// 	c.windowMgr.CloseWindow(compileCompleteHwnd, "Compile Complete dialog")
-	// 	if !opts.SkipPreCompilationDialogCheck {
-	// 		time.Sleep(timeouts.StabilityCheckInterval)
-	// 	}
-	// }
 
 	// Close main window and handle any confirmation dialogs via events
 	if opts.Hwnd != 0 {
@@ -221,13 +213,14 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 }
 
 // handleCompilationEvents uses an event-driven approach to respond to dialogs as they appear
-func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *CompileResult, error) {
+func (c *Compiler) handleCompilationEvents(opts CompileOptions) (*CompileResult, error) {
 	// Maximum time to wait for compilation to complete
 	// Use custom timeout if specified, otherwise use default 5 minutes
 	compilationTimeout := timeouts.CompilationCompleteTimeout
 	if opts.CompilationTimeout > 0 {
 		compilationTimeout = opts.CompilationTimeout
 	}
+
 	timeout := time.NewTimer(compilationTimeout)
 	defer timeout.Stop()
 
@@ -237,7 +230,6 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 	var (
 		compilingDetected       bool
 		compileCompleteDetected bool
-		compileCompleteHwnd     uintptr
 		compilingDialogHwnd     uintptr
 	)
 
@@ -303,12 +295,12 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 				result.HasErrors = result.Errors > 0 || len(result.ErrorMessages) > 0
 
 				// Compilation complete
-				return compileCompleteHwnd, result, nil
+				return result, nil
 			}
 
 		case <-timeout.C:
 			c.log.Error("Compilation timeout: compilation did not complete within 5 minutes")
-			return opts.Hwnd, &CompileResult{
+			return &CompileResult{
 				Errors:    1,
 				HasErrors: true,
 				ErrorMessages: []string{
