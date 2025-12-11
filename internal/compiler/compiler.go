@@ -152,6 +152,10 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 		if err := c.handlePreCompilationDialogs(); err != nil {
 			c.log.Warn("Error handling pre-compilation dialogs", slog.Any("error", err))
 		}
+
+		// Drain any stale events from pre-compilation phase BEFORE triggering compilation
+		// This ensures we start with a clean channel and don't miss the Compiling dialog
+		c.drainMonitorChannel()
 	}
 
 	// Try SendInput first (modern API, atomic operation)
@@ -166,13 +170,12 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 	c.log.Debug("Starting compile monitoring")
 
 	// Only attempt dialog handling if we have a valid PID
-	var compileCompleteHwnd uintptr
-
 	if pid != 0 {
 		// Use event-driven dialog handling
 		var err error
 		var eventResult *CompileResult
-		compileCompleteHwnd, eventResult, err = c.handleCompilationEvents(opts)
+		// compileCompleteHwnd, eventResult, err = c.handleCompilationEvents(opts)
+		_, eventResult, err = c.handleCompilationEvents(opts)
 		if err != nil {
 			// Return the result even on error so caller can see what happened
 			return eventResult, err
@@ -186,10 +189,12 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 	c.log.Debug("Closing dialogs and VTPro...")
 
 	// First, close the "Compile Complete" dialog if it's still open
-	if compileCompleteHwnd != 0 {
-		c.windowMgr.CloseWindow(compileCompleteHwnd, "Compile Complete dialog")
-		time.Sleep(timeouts.StabilityCheckInterval)
-	}
+	// if compileCompleteHwnd != 0 {
+	// 	c.windowMgr.CloseWindow(compileCompleteHwnd, "Compile Complete dialog")
+	// 	if !opts.SkipPreCompilationDialogCheck {
+	// 		time.Sleep(timeouts.StabilityCheckInterval)
+	// 	}
+	// }
 
 	// Close main window and handle any confirmation dialogs via events
 	if opts.Hwnd != 0 {
@@ -203,7 +208,9 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 			}
 		}
 
-		time.Sleep(timeouts.CleanupDelay)
+		if !opts.SkipPreCompilationDialogCheck {
+			time.Sleep(timeouts.CleanupDelay)
+		}
 	}
 
 	if result.HasErrors {
@@ -268,8 +275,10 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (uintptr, *Compi
 					c.log.Debug("Compiling dialog disappeared - compilation complete")
 					c.log.Info("Compilation finished, reading results...")
 
-					// Give UI a moment to update
-					time.Sleep(500 * time.Millisecond)
+					// Give UI a moment to update (skip in test mode for speed)
+					if !opts.SkipPreCompilationDialogCheck {
+						time.Sleep(500 * time.Millisecond)
+					}
 
 					// Read Message Log from main window
 					logText := c.readMessageLog(opts.Hwnd)
@@ -499,8 +508,9 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	// Process lines, handling multi-line messages (VTPro wraps long lines)
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
@@ -510,6 +520,27 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 			// Extract the warning message after "[ warning ]:"
 			if idx := strings.Index(line, "[ warning ]:"); idx != -1 {
 				msg := strings.TrimSpace(line[idx+len("[ warning ]:"):])
+
+				// Check if next lines are continuations (indented or part of wrapped message)
+				// Limit continuation to prevent unbounded growth
+				maxContinuations := 5
+				continuations := 0
+				for i+1 < len(lines) && continuations < maxContinuations {
+					nextLine := lines[i+1]
+					// If next line doesn't start with a marker, it's a continuation
+					if !strings.Contains(nextLine, "[ error ]") &&
+						!strings.Contains(nextLine, "[ warning ]") &&
+						!strings.Contains(nextLine, "----------") &&
+						!strings.Contains(nextLine, "warning(s)") &&
+						strings.TrimSpace(nextLine) != "" {
+						i++
+						continuations++
+						msg += " " + strings.TrimSpace(nextLine)
+					} else {
+						break
+					}
+				}
+
 				if msg != "" {
 					result.WarningMessages = append(result.WarningMessages, msg)
 					c.log.Debug("Found warning message", slog.String("message", msg))
@@ -522,6 +553,27 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 			// Extract the error message after "[ error ]:"
 			if idx := strings.Index(line, "[ error ]:"); idx != -1 {
 				msg := strings.TrimSpace(line[idx+len("[ error ]:"):])
+
+				// Check if next lines are continuations (indented or part of wrapped message)
+				// Limit continuation to prevent unbounded growth
+				maxContinuations := 5
+				continuations := 0
+				for i+1 < len(lines) && continuations < maxContinuations {
+					nextLine := lines[i+1]
+					// If next line doesn't start with a marker, it's a continuation
+					if !strings.Contains(nextLine, "[ error ]") &&
+						!strings.Contains(nextLine, "[ warning ]") &&
+						!strings.Contains(nextLine, "----------") &&
+						!strings.Contains(nextLine, "warning(s)") &&
+						strings.TrimSpace(nextLine) != "" {
+						i++
+						continuations++
+						msg += " " + strings.TrimSpace(nextLine)
+					} else {
+						break
+					}
+				}
+
 				if msg != "" {
 					result.ErrorMessages = append(result.ErrorMessages, msg)
 					c.log.Debug("Found error message", slog.String("message", msg))
@@ -580,4 +632,33 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 		slog.String("size", result.Size),
 		slog.String("projectSize", result.ProjectSize),
 	)
+}
+
+// drainMonitorChannel drains any pending events from the monitor channel
+// to ensure we don't miss critical events during compilation monitoring.
+// This clears any stale pre-compilation events that may have accumulated.
+func (c *Compiler) drainMonitorChannel() {
+	if windows.MonitorCh == nil {
+		return
+	}
+
+	c.log.Debug("Draining channel before compilation monitoring")
+	drained := 0
+	draining := true
+	for draining {
+		select {
+		case ev := <-windows.MonitorCh:
+			drained++
+			c.log.Trace("Drained pre-compilation event",
+				slog.String("title", ev.Title),
+				slog.Uint64("hwnd", uint64(ev.Hwnd)))
+		default:
+			// Channel empty, ready to start monitoring
+			draining = false
+		}
+	}
+
+	if drained > 0 {
+		c.log.Debug("Channel drained", slog.Int("events", drained))
+	}
 }

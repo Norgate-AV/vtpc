@@ -18,8 +18,8 @@ const (
 )
 
 var (
-	shell32          = syscall.NewLazyDLL("shell32.dll")
-	procShellExecute = shell32.NewProc("ShellExecuteW")
+	shell32                      = syscall.NewLazyDLL("shell32.dll")
+	procShellExecute             = shell32.NewProc("ShellExecuteW")
 	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
 	ProcCreateToolhelp32Snapshot = kernel32.NewProc("CreateToolhelp32Snapshot")
 	ProcProcess32First           = kernel32.NewProc("Process32FirstW")

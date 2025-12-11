@@ -58,7 +58,8 @@ const (
 
 	// MonitorPollingInterval is the interval at which the background window
 	// monitor checks for new windows and dialog events.
-	MonitorPollingInterval = 500 * time.Millisecond
+	// Set to 50ms to catch fast-appearing dialogs (e.g., Compiling dialog with errors can appear/disappear in < 500ms)
+	MonitorPollingInterval = 50 * time.Millisecond
 
 	// CleanupDelay allows time for windows and processes to close gracefully
 	// before performing verification checks or additional cleanup operations.

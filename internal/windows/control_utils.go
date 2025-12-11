@@ -19,8 +19,21 @@ var controlExtractors = map[string]ControlExtractor{
 	},
 	"ListBox": func(hwnd uintptr) (string, []string) {
 		items := GetListBoxItems(hwnd)
-		// Join for text field for backward compatibility
-		return strings.Join(items, "\n"), items
+		// Join for text field, but limit total size to prevent allocation errors
+		// Calculate safe maximum size: if items are extremely large, truncate
+		const maxJoinedSize = 1024 * 1024 // 1MB limit for joined string
+		totalSize := 0
+		safeItems := make([]string, 0, len(items))
+
+		for _, item := range items {
+			if totalSize+len(item)+1 > maxJoinedSize { // +1 for newline
+				break
+			}
+			safeItems = append(safeItems, item)
+			totalSize += len(item) + 1
+		}
+
+		return strings.Join(safeItems, "\n"), items
 	},
 }
 
@@ -82,10 +95,10 @@ func GetListBoxItems(hwnd uintptr) []string {
 			continue
 		}
 
-		// Allocate buffer and get the text
-		var buf [256]uint16
+		// Allocate buffer based on actual text length (add extra space for null terminator)
+		buf := make([]uint16, itemLen+256)
 		_, _, _ = procSendMessageW.Call(hwnd, LB_GETTEXT, uintptr(i), uintptr(unsafe.Pointer(&buf[0])))
-		text := syscall.UTF16ToString(buf[:])
+		text := syscall.UTF16ToString(buf)
 		items = append(items, text)
 	}
 

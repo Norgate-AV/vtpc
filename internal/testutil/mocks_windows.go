@@ -162,7 +162,7 @@ func (m *MockWindowManager) WithWindowValid(hwnd uintptr, valid bool) *MockWindo
 func SendEventsToMonitor(events ...windows.WindowEvent) {
 	// Ensure the channel exists
 	if windows.MonitorCh == nil {
-		windows.MonitorCh = make(chan windows.WindowEvent, 64)
+		windows.MonitorCh = make(chan windows.WindowEvent, 256)
 	}
 
 	// Send events synchronously so they're immediately available
@@ -173,7 +173,7 @@ func SendEventsToMonitor(events ...windows.WindowEvent) {
 
 // SetupMonitorChannel initializes the MonitorCh for testing
 func SetupMonitorChannel() {
-	windows.MonitorCh = make(chan windows.WindowEvent, 64)
+	windows.MonitorCh = make(chan windows.WindowEvent, 256)
 }
 
 // CleanupMonitorChannel cleans up the MonitorCh after testing

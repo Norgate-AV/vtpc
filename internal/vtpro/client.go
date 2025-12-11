@@ -266,8 +266,9 @@ func (c *Client) StartMonitoring(pid uint32) func() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
-		// Init channel
-		windows.MonitorCh = make(chan windows.WindowEvent, 64)
+		// Init channel with larger buffer to handle bursts of events
+		// (startup splash screens, progress dialogs, warnings, compiling dialog, etc.)
+		windows.MonitorCh = make(chan windows.WindowEvent, 256)
 
 		if pid == 0 {
 			c.log.Warn("Window monitor started with PID=0, monitoring all processes (not recommended)")
