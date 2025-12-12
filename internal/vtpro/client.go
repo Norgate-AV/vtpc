@@ -260,6 +260,79 @@ func (c *Client) ForceCleanup(hwnd uintptr, knownPid uint32) {
 	c.log.Warn("Unable to cleanup VTPro - no hwnd or PID provided")
 }
 
+// WaitForFileLoaded waits for VTPro to complete loading the file by monitoring
+// the "VisionTools Pro-e" and "Progress [xx%]" dialogs that appear during file load.
+// Returns true if file loading completed within timeout, false otherwise.
+func (c *Client) WaitForFileLoaded(pid uint32, timeout time.Duration) bool {
+	if pid == 0 {
+		c.log.Warn("No PID provided for file load monitoring")
+		return false
+	}
+
+	deadline := time.Now().Add(timeout)
+	const (
+		dialogFileLoading = "VisionTools Pro-e"
+		dialogProgress    = "Progress"
+	)
+
+	// Track dialog states
+	seenFileLoadingDialog := false
+	seenProgressDialog := false
+	lastDialogSeenTime := time.Time{}
+
+	c.log.Info("Waiting for file to fully load...")
+	c.log.Debug("Monitoring for file loading dialogs",
+		slog.String("fileLoadingDialog", dialogFileLoading),
+		slog.String("progressDialog", dialogProgress))
+
+	for time.Now().Before(deadline) {
+		select {
+		case ev := <-windows.MonitorCh:
+			// Check for file loading dialog
+			if ev.Title == dialogFileLoading {
+				if !seenFileLoadingDialog {
+					c.log.Debug("Detected file loading dialog", slog.String("title", ev.Title))
+					seenFileLoadingDialog = true
+				}
+				lastDialogSeenTime = time.Now()
+			}
+
+			// Check for progress dialog (can appear multiple times with % in title)
+			if strings.Contains(ev.Title, dialogProgress) {
+				if !seenProgressDialog {
+					c.log.Debug("Detected progress dialog", slog.String("title", ev.Title))
+					seenProgressDialog = true
+				}
+				lastDialogSeenTime = time.Now()
+			}
+
+		default:
+			// No events in channel
+			// If we've seen loading dialogs and haven't seen any for 2 seconds, they're likely closed
+			if seenFileLoadingDialog && time.Since(lastDialogSeenTime) > 2*time.Second {
+				c.log.Debug("File loading dialogs appear to have closed")
+
+				// Wait a bit more to ensure stability
+				time.Sleep(1 * time.Second)
+				c.log.Info("File loading complete")
+				return true
+			}
+
+			// Small sleep to avoid tight loop
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	// Timeout - if we never saw loading dialogs, file might be small/cached
+	if !seenFileLoadingDialog {
+		c.log.Debug("Timeout waiting for file loading dialogs - file may be small or cached")
+		return true // Proceed anyway for small files
+	}
+
+	c.log.Warn("Timeout waiting for file loading to complete")
+	return false
+}
+
 // StartMonitoring starts a background goroutine that monitors VTPro dialogs for a specific PID
 // Returns a function to stop the monitoring
 func (c *Client) StartMonitoring(pid uint32) func() {
@@ -284,6 +357,104 @@ func (c *Client) StartMonitoring(pid uint32) func() {
 
 	return func() {
 		cancel()
+	}
+}
+
+// HandlePostLoadDialogs checks for and dismisses warning dialogs that may appear after file load
+// This includes the "VisionTools(R) Pro-e" warning dialog containing messages like path limitation warnings.
+// This MUST be called BEFORE bringing the window to foreground to ensure dialogs don't interfere.
+func (c *Client) HandlePostLoadDialogs() error {
+	const dialogVTProWarning = "VisionTools(R) Pro-e"
+
+	// Longer timeout to catch warning dialogs that may appear after file load
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+
+	dialogCount := 0
+	maxDialogs := 5 // Prevent infinite loop
+
+	for dialogCount < maxDialogs {
+		select {
+		case ev := <-windows.MonitorCh:
+			c.log.Debug("Received post-load dialog event",
+				slog.String("title", ev.Title),
+				slog.Uint64("hwnd", uint64(ev.Hwnd)))
+
+			dialogCount++
+
+			// Enumerate and log all child controls for this dialog (for debugging)
+			c.enumerateDialogControls(ev.Hwnd, ev.Title)
+
+			// Handle warning dialogs that may appear after file load
+			if ev.Title == dialogVTProWarning {
+				c.log.Debug("Detected VTPro warning dialog - closing")
+				c.log.Info("Handling post-load warning dialog")
+				c.win.Window.CloseWindow(ev.Hwnd, dialogVTProWarning)
+
+				// Give time for dialog to close
+				time.Sleep(500 * time.Millisecond)
+			} else {
+				// Log but don't handle other dialogs here
+				c.log.Trace("Ignoring post-load dialog", slog.String("title", ev.Title))
+			}
+
+		case <-timeout.C:
+			// Timeout is fine - no blocking dialogs present
+			c.log.Debug("Post-load dialog check complete", slog.Int("dialogsHandled", dialogCount))
+			return nil
+		}
+	}
+
+	c.log.Warn("Stopped checking for post-load dialogs after handling maximum count",
+		slog.Int("maxDialogs", maxDialogs))
+	return nil
+}
+
+// enumerateDialogControls enumerates and logs all child controls in a dialog window
+func (c *Client) enumerateDialogControls(hwnd uintptr, title string) {
+	c.log.Trace("Enumerating dialog controls",
+		slog.String("title", title),
+		slog.Uint64("hwnd", uint64(hwnd)))
+
+	// Get the main window text (dialog body text, if any)
+	windowText := windows.GetWindowText(hwnd)
+	if windowText != "" {
+		c.log.Trace("Dialog window text",
+			slog.String("title", title),
+			slog.String("text", windowText))
+	}
+
+	// Collect all child controls
+	childInfos := windows.CollectChildInfos(hwnd)
+
+	if len(childInfos) == 0 {
+		c.log.Trace("No child controls found in dialog",
+			slog.String("title", title))
+		return
+	}
+
+	c.log.Trace("Found child controls in dialog",
+		slog.String("title", title),
+		slog.Int("count", len(childInfos)))
+
+	// Log details for each child control
+	for i, ci := range childInfos {
+		logAttrs := []any{
+			slog.String("title", title),
+			slog.Int("index", i),
+			slog.Uint64("childHwnd", uint64(ci.Hwnd)),
+			slog.String("className", ci.ClassName),
+		}
+
+		if ci.Text != "" {
+			logAttrs = append(logAttrs, slog.String("text", ci.Text))
+		}
+
+		if len(ci.Items) > 0 {
+			logAttrs = append(logAttrs, slog.Any("items", ci.Items))
+		}
+
+		c.log.Trace("Child control", logAttrs...)
 	}
 }
 

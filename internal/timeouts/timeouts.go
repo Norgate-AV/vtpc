@@ -15,6 +15,11 @@ const (
 	// to stabilize and become responsive after the window appears.
 	WindowReadyTimeout = 30 * time.Second
 
+	// FileLoadTimeout is the maximum time to wait for VTPro to finish
+	// loading a file. Large files with many pages and themes can take
+	// several minutes to load. We allow up to 5 minutes.
+	FileLoadTimeout = 5 * time.Minute
+
 	// UISettlingDelay allows time for window animations, focus events, and
 	// UI state to stabilize before interacting with the application.
 	UISettlingDelay = 5 * time.Second

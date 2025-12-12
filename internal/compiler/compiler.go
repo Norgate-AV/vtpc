@@ -15,10 +15,47 @@ import (
 	"github.com/Norgate-AV/vtpc/internal/windows"
 )
 
+// Startup and Readiness sequence (visually)
+// 1. VTPro Splash Screen
+//    - Shows VTPro "Version" (e.g., "Version 6.2")
+//    - Shows Smart Graphics Controls Version (e.g., "Smart Graphics Controls Ver: 2.19.01.04")
+// 2. Main Window appears. But the file is NOT yet loaded.
+// 3. Almost instantly, two dialogs appear:
+//    - "VisionTools Pro-e". Background dialog.
+//    - "Progress [xx%]". Foreground dialog with progress bar.
+//       - This dialog updates percentage in title as it loads the theme.
+//       - Shows a progress bar and various messages like "Loading project themes", etc.
+//    - "Progress [xx%]" disappears once theme loading is complete.
+//    - "VisionTools Pro-e" dialog now remains in foreground while file load is in progress.
+//       - Dialogs now starts to show various messages like "Loading subpage (17): [Sources] Doc Cam"
+//    - Very briefly, another "Progress [xx%]" dialog may appear while loading final components.
+//       - Only shows for a split second.
+//    - "VisionTools Pro-e" dialog disappears once file load is fully complete.
+//    - These dialogs cannot be interacted with or dismissed. We must wait for them to close automatically.
+// 4. File is now loaded but VTPro is STILL not yet ready for interaction yet.
+// 5. After a short delay, VTPro main window becomes responsive and ready for user interaction.
+//    - Another dialog MAY appear at this time that must be handled: "VisionTools(R) Pro-e".
+//       - This dialog contains warning messages like "WARNING! The controls listed in the output window
+//         that are generating SGD files are close to exceeding the windows path limitations."
+//       - This dialogs has an "OK" button and a dialog close [X] button.
+//       - It must be handled and closed or dismissed before we can proceed if it does appear
+//
+// The workflow we implement (in cmd/root.go waitForWindowReady()):
+//    1. Wait for window to appear with .vtp in title
+//    2. Check if window responds to messages (WM_NULL)
+//    3. Wait for "VisionTools Pro-e" and "Progress [xx%]" dialogs to close (file loaded)
+//    4. Wait 5 seconds for UI to settle
+//    5. Handle any warning dialogs ("VisionTools(R) Pro-e")
+//    6. Bring window to foreground (happens in Compile() below)
+//    7. Verify window is in foreground and send F12 to compile
+
+// Compile sequence (visually)
+// 1. User triggers compile via F12 keystroke.
+
 const (
 	// Dialog title constants
 	dialogCompiling    = "VisionTools Pro-e Compiling..."
-	dialogVTProWarning = "VisionTools(R) Pro-e"
+	dialogVTProWarning = "VisionTools(R) Pro-e" // Warning dialog with OK button
 	dialogAddressBook  = "Address Book"
 )
 
@@ -146,15 +183,10 @@ func (c *Compiler) Compile(opts CompileOptions) (*CompileResult, error) {
 		}, fmt.Errorf("wrong window in foreground - cannot safely send keystrokes")
 	}
 
-	// Handle any pre-compilation dialogs (like "Operation Complete") that may be blocking
+	// Drain any stale events from pre-compilation phase BEFORE triggering compilation
+	// This ensures we start with a clean channel and don't miss the Compiling dialog
 	// Skip this in test mode since tests send all events upfront
 	if pid != 0 && !opts.SkipPreCompilationDialogCheck {
-		if err := c.handlePreCompilationDialogs(); err != nil {
-			c.log.Warn("Error handling pre-compilation dialogs", slog.Any("error", err))
-		}
-
-		// Drain any stale events from pre-compilation phase BEFORE triggering compilation
-		// This ensures we start with a clean channel and don't miss the Compiling dialog
 		c.drainMonitorChannel()
 	}
 
@@ -343,42 +375,6 @@ func (c *Compiler) logCompilationMessages(errorMsgs, warningMsgs []string) {
 	}
 }
 
-// handlePreCompilationDialogs checks for and dismisses dialogs that may block compilation
-// This includes "Operation Complete" dialog that can appear during VTPro startup
-func (c *Compiler) handlePreCompilationDialogs() error {
-	// Short timeout - check if there are any dialogs already present
-	timeout := time.NewTimer(timeouts.WindowMessageDelay)
-	defer timeout.Stop()
-
-	for {
-		select {
-		case ev := <-windows.MonitorCh:
-			c.log.Trace("Received pre-compilation event",
-				slog.String("title", ev.Title),
-				slog.Uint64("hwnd", uint64(ev.Hwnd)))
-
-			// Enumerate and log all child controls for this dialog
-			c.enumerateDialogControls(ev.Hwnd, ev.Title)
-
-			// Handle dialogs that may block compilation
-			switch ev.Title {
-			case dialogVTProWarning:
-				c.log.Trace("Detected VTPro warning dialog - closing")
-				c.log.Debug("Handling pre-compilation warning dialog")
-				c.windowMgr.CloseWindow(ev.Hwnd, dialogVTProWarning)
-
-			default:
-				// Log but don't handle other dialogs here
-				c.log.Trace("Ignoring pre-compilation dialog", slog.String("title", ev.Title))
-			}
-
-		case <-timeout.C:
-			// Timeout is fine - no blocking dialogs present
-			return nil
-		}
-	}
-}
-
 // handlePostCompilationEvents waits for and handles any post-compilation dialogs (like Address Book)
 func (c *Compiler) handlePostCompilationEvents() error {
 	// Short timeout - if no confirmation dialog appears, that's fine
@@ -403,54 +399,6 @@ func (c *Compiler) handlePostCompilationEvents() error {
 	}
 
 	return nil
-}
-
-// enumerateDialogControls enumerates and logs all child controls in a dialog window
-func (c *Compiler) enumerateDialogControls(hwnd uintptr, title string) {
-	c.log.Trace("Enumerating dialog controls",
-		slog.String("title", title),
-		slog.Uint64("hwnd", uint64(hwnd)))
-
-	// Get the main window text (dialog body text, if any)
-	windowText := c.windowMgr.GetWindowText(hwnd)
-	if windowText != "" {
-		c.log.Trace("Dialog window text",
-			slog.String("title", title),
-			slog.String("text", windowText))
-	}
-
-	// Collect all child controls
-	childInfos := c.windowMgr.CollectChildInfos(hwnd)
-
-	if len(childInfos) == 0 {
-		c.log.Trace("No child controls found in dialog",
-			slog.String("title", title))
-		return
-	}
-
-	c.log.Trace("Found child controls in dialog",
-		slog.String("title", title),
-		slog.Int("count", len(childInfos)))
-
-	// Log details for each child control
-	for i, ci := range childInfos {
-		logAttrs := []any{
-			slog.String("title", title),
-			slog.Int("index", i),
-			slog.Uint64("childHwnd", uint64(ci.Hwnd)),
-			slog.String("className", ci.ClassName),
-		}
-
-		if ci.Text != "" {
-			logAttrs = append(logAttrs, slog.String("text", ci.Text))
-		}
-
-		if len(ci.Items) > 0 {
-			logAttrs = append(logAttrs, slog.Any("items", ci.Items))
-		}
-
-		c.log.Trace("Child control", logAttrs...)
-	}
 }
 
 // readMessageLog finds and reads the Message Log child window in VTPro

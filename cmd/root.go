@@ -221,7 +221,7 @@ func setupSignalHandlers(ctx *ExecutionContext) {
 
 // waitForWindowReady waits for VTPro window to appear and become responsive
 func waitForWindowReady(vtproClient *vtpro.Client, pid uint32, log logger.LoggerInterface) (uintptr, error) {
-	log.Info("Waiting for VTPro to fully launch...")
+	log.Info("Waiting for VTPro window to appear...")
 
 	hwnd, found := vtproClient.WaitForAppear(pid, timeouts.WindowAppearTimeout)
 	if !found {
@@ -239,9 +239,25 @@ func waitForWindowReady(vtproClient *vtpro.Client, pid uint32, log logger.Logger
 		return 0, fmt.Errorf("window appeared but is not responding properly")
 	}
 
+	log.Debug("Window is responsive")
+
+	// Wait for file loading dialogs to complete
+	// This is critical for large files that take time to load themes and pages
+	if !vtproClient.WaitForFileLoaded(pid, timeouts.FileLoadTimeout) {
+		log.Error("Timeout waiting for file to load")
+		return 0, fmt.Errorf("file did not finish loading within timeout")
+	}
+
 	// Small extra delay to allow UI to finish settling
-	log.Info("Waiting a few extra seconds for UI to settle...")
+	log.Info("Waiting for UI to settle...")
 	time.Sleep(timeouts.UISettlingDelay)
+
+	// Handle any warning dialogs that may have appeared after file load
+	// This must happen BEFORE bringing window to foreground
+	log.Debug("Checking for post-load warning dialogs")
+	if err := vtproClient.HandlePostLoadDialogs(); err != nil {
+		log.Warn("Error handling post-load dialogs", slog.Any("error", err))
+	}
 
 	return hwnd, nil
 }
