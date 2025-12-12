@@ -131,7 +131,9 @@ Boot
 
 	assert.Equal(t, 1, result.Errors)
 	assert.Len(t, result.ErrorMessages, 1)
-	assert.Equal(t, "Object \"Video Switcher\" on Page \"Settings\" has an invalid join number that exceeds the maximum allowed value for this device type.", result.ErrorMessages[0])
+	expected := "Object \"Video Switcher\" on Page \"Settings\" has an invalid join number that " +
+		"exceeds the maximum allowed value for this device type."
+	assert.Equal(t, expected, result.ErrorMessages[0])
 }
 
 func TestParseVTProOutput_MultiLineWarningMessage(t *testing.T) {
@@ -151,7 +153,9 @@ Boot
 
 	assert.Equal(t, 1, result.Warnings)
 	assert.Len(t, result.WarningMessages, 1)
-	assert.Equal(t, "The controls listed are close to exceeding the windows path limitations and may cause issues during compilation or deployment.", result.WarningMessages[0])
+	expected := "The controls listed are close to exceeding the windows path limitations and may " +
+		"cause issues during compilation or deployment."
+	assert.Equal(t, expected, result.WarningMessages[0])
 }
 
 func TestParseVTProOutput_ExactlyFiveContinuationLines(t *testing.T) {
@@ -175,7 +179,8 @@ Boot
 	assert.Equal(t, 1, result.Errors)
 	assert.Len(t, result.ErrorMessages, 1)
 	// Should include all 5 continuation lines
-	expected := "This is line one of the error message and this is line two and this is line three and this is line four and this is line five and this is line six which should be included"
+	expected := "This is line one of the error message and this is line two and this is line three " +
+		"and this is line four and this is line five and this is line six which should be included"
 	assert.Equal(t, expected, result.ErrorMessages[0])
 }
 
@@ -371,7 +376,8 @@ func TestParseVTProOutput_WindowsLineEndings(t *testing.T) {
 	log := logger.NewNoOpLogger()
 	c := NewCompiler(log)
 
-	output := "---------- Compiling for TSW-770: [test.vtp] ---------\r\nBoot\r\n\t[ error ]: Test error\r\n----------  Failed  ---------\r\n0 warning(s), 1 error(s)"
+	output := "---------- Compiling for TSW-770: [test.vtp] ---------\r\nBoot\r\n" +
+		"\t[ error ]: Test error\r\n----------  Failed  ---------\r\n0 warning(s), 1 error(s)"
 
 	result := &CompileResult{}
 	c.parseVTProOutput(output, result)
