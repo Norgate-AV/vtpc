@@ -265,7 +265,7 @@ func (c *Compiler) handleCompilationEvents(opts CompileOptions) (*CompileResult,
 				// Poll to see if the compiling dialog still exists
 				if !c.windowMgr.IsWindowValid(compilingDialogHwnd) {
 					c.log.Debug("Compiling dialog disappeared - compilation complete")
-					c.log.Info("Compilation finished, reading results...")
+					c.log.Info("Gathering details...")
 
 					// Give UI a moment to update (skip in test mode for speed)
 					if !opts.SkipPreCompilationDialogCheck {
@@ -353,7 +353,7 @@ func (c *Compiler) handlePreCompilationDialogs() error {
 	for {
 		select {
 		case ev := <-windows.MonitorCh:
-			c.log.Debug("Received pre-compilation event",
+			c.log.Trace("Received pre-compilation event",
 				slog.String("title", ev.Title),
 				slog.Uint64("hwnd", uint64(ev.Hwnd)))
 
@@ -363,8 +363,8 @@ func (c *Compiler) handlePreCompilationDialogs() error {
 			// Handle dialogs that may block compilation
 			switch ev.Title {
 			case dialogVTProWarning:
-				c.log.Debug("Detected VTPro warning dialog - closing")
-				c.log.Info("Handling pre-compilation warning dialog")
+				c.log.Trace("Detected VTPro warning dialog - closing")
+				c.log.Debug("Handling pre-compilation warning dialog")
 				c.windowMgr.CloseWindow(ev.Hwnd, dialogVTProWarning)
 
 			default:
@@ -387,14 +387,14 @@ func (c *Compiler) handlePostCompilationEvents() error {
 
 	select {
 	case ev := <-windows.MonitorCh:
-		c.log.Debug("Received post-compilation event",
+		c.log.Trace("Received post-compilation event",
 			slog.String("title", ev.Title),
 			slog.Uint64("hwnd", uint64(ev.Hwnd)))
 
 		// Handle Address Book dialog if it appears
 		if ev.Title == dialogAddressBook {
-			c.log.Debug("Detected 'Address Book' dialog - closing")
-			c.log.Info("Handling Address Book dialog")
+			c.log.Trace("Detected 'Address Book' dialog - closing")
+			c.log.Debug("Handling Address Book dialog")
 			c.windowMgr.CloseWindow(ev.Hwnd, dialogAddressBook)
 		}
 
@@ -455,7 +455,7 @@ func (c *Compiler) enumerateDialogControls(hwnd uintptr, title string) {
 
 // readMessageLog finds and reads the Message Log child window in VTPro
 func (c *Compiler) readMessageLog(mainHwnd uintptr) string {
-	c.log.Debug("Reading Message Log from main window")
+	c.log.Trace("Reading Message Log from main window")
 
 	childInfos := c.windowMgr.CollectChildInfos(mainHwnd)
 
@@ -470,7 +470,7 @@ func (c *Compiler) readMessageLog(mainHwnd uintptr) string {
 		if strings.Contains(ci.Text, "Compiling for") ||
 			strings.Contains(ci.Text, "Successful") ||
 			strings.Contains(ci.Text, "error(s)") {
-			c.log.Debug("Found Message Log content",
+			c.log.Trace("Found Message Log content",
 				slog.String("className", ci.ClassName),
 				slog.Int("textLength", len(ci.Text)),
 			)
@@ -496,7 +496,7 @@ func (c *Compiler) readMessageLog(mainHwnd uintptr) string {
 // ---------- Successful ---------
 // 1 warning(s), 0 error(s)
 func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
-	c.log.Debug("Parsing VTPro output", slog.Int("textLength", len(text)))
+	c.log.Trace("Parsing VTPro output", slog.Int("textLength", len(text)))
 
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 
@@ -535,7 +535,7 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 
 				if msg != "" {
 					result.WarningMessages = append(result.WarningMessages, msg)
-					c.log.Debug("Found warning message", slog.String("message", msg))
+					c.log.Trace("Found warning message", slog.String("message", msg))
 				}
 			}
 		}
@@ -568,7 +568,7 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 
 				if msg != "" {
 					result.ErrorMessages = append(result.ErrorMessages, msg)
-					c.log.Debug("Found error message", slog.String("message", msg))
+					c.log.Trace("Found error message", slog.String("message", msg))
 				}
 			}
 		}
@@ -579,7 +579,7 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 				size := strings.TrimSpace(line[idx+len("[ size ]:"):])
 				if size != "" {
 					result.Size = size
-					c.log.Debug("Found size", slog.String("size", size))
+					c.log.Trace("Found size", slog.String("size", size))
 				}
 			}
 		}
@@ -590,7 +590,7 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 				projectSize := strings.TrimSpace(line[idx+len("[ project size ]:"):])
 				if projectSize != "" {
 					result.ProjectSize = projectSize
-					c.log.Debug("Found project size", slog.String("projectSize", projectSize))
+					c.log.Trace("Found project size", slog.String("projectSize", projectSize))
 				}
 			}
 		}
@@ -598,7 +598,7 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 		// Look for the summary line: "0 warning(s), 0 error(s)"
 		// or "X warning(s), Y error(s)"
 		if strings.Contains(line, "warning(s)") && strings.Contains(line, "error(s)") {
-			c.log.Debug("Found summary line", slog.String("line", line))
+			c.log.Trace("Found summary line", slog.String("line", line))
 
 			// Parse: "0 warning(s), 0 error(s)"
 			pattern := regexp.MustCompile(`(\d+)\s+warning\(s\),\s+(\d+)\s+error\(s\)`)
@@ -606,19 +606,19 @@ func (c *Compiler) parseVTProOutput(text string, result *CompileResult) {
 
 			if len(matches) >= 3 {
 				if warnings, err := fmt.Sscanf(matches[1], "%d", &result.Warnings); err == nil {
-					c.log.Debug("Parsed warnings", slog.Int("warnings", result.Warnings))
+					c.log.Trace("Parsed warnings", slog.Int("warnings", result.Warnings))
 					_ = warnings
 				}
 
 				if errors, err := fmt.Sscanf(matches[2], "%d", &result.Errors); err == nil {
-					c.log.Debug("Parsed errors", slog.Int("errors", result.Errors))
+					c.log.Trace("Parsed errors", slog.Int("errors", result.Errors))
 					_ = errors
 				}
 			}
 		}
 	}
 
-	c.log.Debug("Parse complete",
+	c.log.Trace("Parse complete",
 		slog.Int("warnings", result.Warnings),
 		slog.Int("errors", result.Errors),
 		slog.String("size", result.Size),
